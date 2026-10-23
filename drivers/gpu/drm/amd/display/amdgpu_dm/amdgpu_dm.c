@@ -50,6 +50,7 @@
 #include "amdgpu_ucode.h"
 #include "atom.h"
 #include "amdgpu_dm.h"
+#include "amdgpu_dm_dv.h"
 #include "amdgpu_dm_plane.h"
 #include "amdgpu_dm_crtc.h"
 #include "amdgpu_dm_hdcp.h"
@@ -5604,6 +5605,8 @@ static int dm_update_crtc_state(struct amdgpu_display_manager *dm,
 		 */
 		if (amdgpu_freesync_vid_mode &&
 		    dm_new_crtc_state->stream &&
+		    dm_new_conn_state->dv_standard == dm_old_conn_state->dv_standard &&
+		    dm_new_conn_state->hdr10_deep_color == dm_old_conn_state->hdr10_deep_color &&
 		    amdgpu_dm_is_timing_unchanged_for_freesync(new_crtc_state, old_crtc_state))
 			goto skip_modeset;
 
@@ -6272,6 +6275,9 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 		drm_dbg_atomic(dev, "drm_atomic_helper_check_modeset() failed: %pe\n", ERR_PTR(ret));
 		goto fail;
 	}
+	ret = amdgpu_dm_dv_add_affected(state);
+	if (ret)
+		goto fail;
 
 	/* Check connector changes */
 	for_each_oldnew_connector_in_state(state, connector, old_con_state, new_con_state, i) {
@@ -6494,6 +6500,9 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 		drm_dbg_atomic(dev, "drm_atomic_helper_check_planes() failed: %pe\n", ERR_PTR(ret));
 		goto fail;
 	}
+	ret = amdgpu_dm_dv_atomic_check(state);
+	if (ret)
+		goto fail;
 
 	for_each_new_crtc_in_state(state, crtc, new_crtc_state, i) {
 		dm_new_crtc_state = to_dm_crtc_state(new_crtc_state);
@@ -6736,6 +6745,19 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 		dm_new_crtc_state->update_type = lock_and_validation_needed ?
 			UPDATE_TYPE_FULL : UPDATE_TYPE_FAST;
 	}
+
+	/* DC validation must not turn a byte-preserving tunnel into a color
+	 * pipeline. Recheck after global validation as well as before fast paths.
+	 */
+	ret = amdgpu_dm_dv_atomic_check(state);
+	if (ret)
+		goto fail;
+
+	/* Native DC validation/format selection owns the final depth. Never
+	 * promote a requested max bpc or framebuffer depth into a link guarantee. */
+	ret = amdgpu_dm_hdr10_atomic_check(state);
+	if (ret)
+		goto fail;
 
 	/* Must be success */
 	WARN_ON(ret);

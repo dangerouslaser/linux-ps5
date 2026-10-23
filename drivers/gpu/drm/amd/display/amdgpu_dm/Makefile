@@ -28,6 +28,7 @@
 ifneq ($(CONFIG_DRM_AMD_DC),)
 AMDGPUDM = \
 	amdgpu_dm.o \
+	amdgpu_dm_dv.o \
 	amdgpu_dm_plane.o \
 	amdgpu_dm_crtc.o \
 	amdgpu_dm_irq.o \

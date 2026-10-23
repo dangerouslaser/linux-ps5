@@ -3766,6 +3766,10 @@ bool dc_is_timing_changed(struct dc_stream_state *cur_stream,
 	if (cur_stream == NULL)
 		return true;
 
+	/* Entry and exit must reprogram HDMI packets and the color pipeline. */
+	if (cur_stream->dv_standard != new_stream->dv_standard)
+		return true;
+
 	/* If output color space is changed, need to reprogram info frames */
 	if (cur_stream->output_color_space != new_stream->output_color_space)
 		return true;

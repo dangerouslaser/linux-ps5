@@ -616,8 +616,12 @@ int amdgpu_dm_crtc_configure_crc_source(struct drm_crtc *crtc,
 		}
 	}
 
-	/* Configure dithering */
-	if (!dm_need_crc_dither(source)) {
+	/* Configure dithering, but never rewrite an active byte-preserving DV
+	 * formatter for a diagnostic CRC request (including stopping capture).
+	 */
+	if (stream_state && stream_state->dv_standard) {
+		/* Preserve both dither and dynamic expansion. */
+	} else if (!dm_need_crc_dither(source)) {
 		dc_stream_set_dither_option(stream_state, DITHER_OPTION_TRUN8);
 		dc_stream_set_dyn_expansion(stream_state->ctx->dc, stream_state,
 					    DYN_EXPANSION_DISABLE);

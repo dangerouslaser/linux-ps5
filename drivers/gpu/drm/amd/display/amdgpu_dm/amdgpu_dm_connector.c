@@ -41,6 +41,7 @@
 #include "amdgpu.h"
 #include "amdgpu_display.h"
 #include "amdgpu_dm.h"
+#include "amdgpu_dm_dv.h"
 #include "amdgpu_dm_connector.h"
 #include "amdgpu_dm_plane.h"
 #include "amdgpu_dm_crtc.h"
@@ -912,6 +913,64 @@ static void dm_ps5_set_hdr_timing(struct dc_crtc_timing *timing,
 }
 #endif
 
+static void amdgpu_dm_hdr10_select_format(struct dc_stream_state *stream,
+		const struct drm_connector_state *con,
+		const struct drm_display_mode *mode, int requested_bpc)
+{
+	const struct dm_connector_state *state = to_dm_connector_state(con);
+	const struct drm_display_info *info = &con->connector->display_info;
+	struct dc_crtc_timing *timing = &stream->timing;
+	struct dc_crtc_timing candidate;
+
+	/* Only this private HDR10 request may trade chroma for real precision.
+	 * Keep a supported RGB10+ result and leave Vanilla/DV tunnels untouched. */
+	if (!state->hdr10_deep_color || amdgpu_dm_hdr10_validate(state) ||
+	    stream->signal != SIGNAL_TYPE_HDMI_TYPE_A || !stream->link ||
+	    stream->link->connector_signal != SIGNAL_TYPE_HDMI_TYPE_A ||
+	    requested_bpc < 10 ||
+	    (timing->pixel_encoding != PIXEL_ENCODING_RGB &&
+	     timing->pixel_encoding != PIXEL_ENCODING_YCBCR420) ||
+	    (timing->pixel_encoding == PIXEL_ENCODING_RGB &&
+	     timing->display_color_depth != COLOR_DEPTH_888 &&
+	     !drm_mode_is_420_only(info, mode)))
+		return;
+
+	/* HDMI 4:2:2 deep color uses the pixel clock's TMDS rate. Native DC
+	 * still validates the source/link; no clocks or bandwidth are forced. */
+	if (timing->pixel_encoding == PIXEL_ENCODING_RGB &&
+	    !drm_mode_is_420_only(info, mode) &&
+	    (info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422)) &&
+	    info->max_tmds_clock > 0 &&
+	    timing->pix_clk_100hz <= (unsigned int)info->max_tmds_clock * 10) {
+		timing->pixel_encoding = PIXEL_ENCODING_YCBCR422;
+		timing->display_color_depth = COLOR_DEPTH_101010;
+		return;
+	}
+	/* A CTA 4:2:0-only timing cannot be sent as RGB or 4:2:2. */
+	if (!drm_mode_is_420(info, mode)) {
+		if (timing->pixel_encoding == PIXEL_ENCODING_YCBCR420)
+			timing->display_color_depth = COLOR_DEPTH_888;
+		return;
+	}
+	/* Recompute from the separate EDID 4:2:0 deep-color capabilities,
+	 * not from the precision already reduced by the RGB attempt. */
+	candidate = *timing;
+	candidate.pixel_encoding = PIXEL_ENCODING_YCBCR420;
+	candidate.display_color_depth =
+		amdgpu_dm_convert_color_depth_from_display_info(con->connector, true,
+								requested_bpc);
+	if (!adjust_colour_depth_from_display_info(&candidate, info))
+		candidate.display_color_depth = COLOR_DEPTH_888;
+	/* Also revalidate native RGB-to-4:2:0 fallback: its depth can still
+	 * reflect RGB EDID caps. Shallow candidates reach the final guard. */
+	if (timing->pixel_encoding == PIXEL_ENCODING_YCBCR420 ||
+	    drm_mode_is_420_only(info, mode) ||
+	    (candidate.display_color_depth == COLOR_DEPTH_101010 ||
+	     candidate.display_color_depth == COLOR_DEPTH_121212 ||
+	     candidate.display_color_depth == COLOR_DEPTH_161616))
+		*timing = candidate;
+}
+
 STATIC_IFN_KUNIT void fill_stream_properties_from_drm_display_mode(
 	struct dc_stream_state *stream,
 	const struct drm_display_mode *mode_in,
@@ -1026,6 +1085,7 @@ STATIC_IFN_KUNIT void fill_stream_properties_from_drm_display_mode(
 	dm_ps5_set_hdr_timing(timing_out, mode_in, connector_state);
 #endif
 
+	amdgpu_dm_hdr10_select_format(stream, connector_state, mode_in, requested_bpc);
 	stream->output_color_space = amdgpu_dm_get_output_color_space(timing_out, connector_state);
 	stream->content_type = get_output_content_type(connector_state);
 }
@@ -1520,6 +1580,9 @@ create_stream_for_sink(struct drm_connector *connector,
 	struct dc_link *link = NULL;
 	struct dc_sink *sink = NULL;
 
+	if (amdgpu_dm_hdr10_validate(dm_state))
+		return NULL;
+
 	drm_mode_init(&mode, drm_mode);
 	memset(&saved_mode, 0, sizeof(saved_mode));
 
@@ -1671,6 +1734,11 @@ create_stream_for_sink(struct drm_connector *connector,
 		mod_build_vsc_infopacket(stream, &stream->vsc_infopacket, stream->output_color_space, tf);
 		aconnector->sr_skip_count = AMDGPU_DM_PSR_ENTRY_DELAY;
 
+	}
+	if (dm_state->dv_standard &&
+	    amdgpu_dm_dv_configure_stream(stream, dm_state, drm_mode)) {
+		dc_stream_release(stream);
+		stream = NULL;
 	}
 finish:
 	dc_sink_release(sink);
@@ -1845,6 +1913,21 @@ int amdgpu_dm_connector_atomic_set_property(struct drm_connector *connector,
 
 	int ret = -EINVAL;
 
+	if (to_amdgpu_dm_connector(connector)->hdr10_deep_color_property &&
+	    property == to_amdgpu_dm_connector(connector)->hdr10_deep_color_property) {
+		if (val > 1)
+			return -EINVAL;
+		dm_new_state->hdr10_deep_color = val;
+		return 0;
+	}
+
+	if (property == to_amdgpu_dm_connector(connector)->dv_standard_property) {
+		if (val > 1)
+			return -EINVAL;
+		dm_new_state->dv_standard = val;
+		return 0;
+	}
+
 	if (property == dev->mode_config.scaling_mode_property) {
 		enum amdgpu_rmx_type rmx_type;
 
@@ -1908,6 +1991,17 @@ int amdgpu_dm_connector_atomic_get_property(struct drm_connector *connector,
 	struct dm_connector_state *dm_state =
 		to_dm_connector_state(state);
 	int ret = -EINVAL;
+
+	if (to_amdgpu_dm_connector(connector)->hdr10_deep_color_property &&
+	    property == to_amdgpu_dm_connector(connector)->hdr10_deep_color_property) {
+		*val = dm_state->hdr10_deep_color;
+		return 0;
+	}
+
+	if (property == to_amdgpu_dm_connector(connector)->dv_standard_property) {
+		*val = dm_state->dv_standard;
+		return 0;
+	}
 
 	if (property == dev->mode_config.scaling_mode_property) {
 		switch (dm_state->scaling) {
@@ -2676,6 +2770,17 @@ amdgpu_dm_connector_atomic_check(struct drm_connector *conn,
 	if (!crtc)
 		return 0;
 
+	if (to_dm_connector_state(new_con_state)->dv_standard !=
+	    to_dm_connector_state(old_con_state)->dv_standard ||
+	    to_dm_connector_state(new_con_state)->hdr10_deep_color !=
+	    to_dm_connector_state(old_con_state)->hdr10_deep_color) {
+		new_crtc_state = drm_atomic_get_crtc_state(state, crtc);
+		if (IS_ERR(new_crtc_state))
+			return PTR_ERR(new_crtc_state);
+		/* Entry and exit are real modesets, not a late infoframe update. */
+		new_crtc_state->mode_changed = true;
+	}
+
 	if (new_con_state->privacy_screen_sw_state != old_con_state->privacy_screen_sw_state) {
 		new_crtc_state = drm_atomic_get_crtc_state(state, crtc);
 		if (IS_ERR(new_crtc_state))
@@ -3328,6 +3433,7 @@ void amdgpu_dm_connector_init_helper(struct amdgpu_display_manager *dm,
 	if (connector_type == DRM_MODE_CONNECTOR_HDMIA
 		|| (connector_type == DRM_MODE_CONNECTOR_DisplayPort && !aconnector->mst_root))
 		drm_connector_attach_broadcast_rgb_property(&aconnector->base);
+	amdgpu_dm_dv_attach(aconnector);
 
 	drm_object_attach_property(&aconnector->base.base,
 				adev->mode_info.underscan_property,

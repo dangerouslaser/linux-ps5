@@ -205,6 +205,8 @@ struct dc_stream_state {
 	 */
 	struct link_encoder *link_enc;
 	struct dc_stream_debug_options debug;
+	/* RGB8 carries packed video/metadata, not color-managed RGB content. */
+	bool dv_standard;
 	struct dc_panel_patch sink_patches;
 	struct dc_crtc_timing timing;
 	struct dc_crtc_timing_adjust adjust;

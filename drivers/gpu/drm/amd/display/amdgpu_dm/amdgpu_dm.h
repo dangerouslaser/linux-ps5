@@ -825,6 +825,8 @@ struct amdgpu_hdmi_vsdb_info {
 struct amdgpu_dm_connector {
 
 	struct drm_connector base;
+	struct drm_property *dv_standard_property;
+	struct drm_property *hdr10_deep_color_property;
 	uint32_t connector_id;
 	int bl_idx;
 
@@ -1085,6 +1087,8 @@ struct dm_atomic_state {
 
 struct dm_connector_state {
 	struct drm_connector_state base;
+	bool dv_standard;
+	bool hdr10_deep_color;
 
 	enum amdgpu_rmx_type scaling;
 	uint8_t underscan_vborder;

@@ -31,6 +31,7 @@
 #include "dc.h"
 #include "amdgpu.h"
 #include "amdgpu_dm.h"
+#include "amdgpu_dm_dv.h"
 #include "amdgpu_dm_crtc.h"
 #include "amdgpu_dm_psr.h"
 #include "amdgpu_dm_replay.h"
@@ -124,7 +125,9 @@ void amdgpu_dm_get_freesync_config_for_crtc(
 
 	aconnector = to_amdgpu_dm_connector(new_con_state->base.connector);
 
-	new_crtc_state->vrr_supported = new_con_state->freesync_capable &&
+	/* No FreeSync capability InfoFrame while bytes carry the DV tunnel. */
+	new_crtc_state->vrr_supported = !new_con_state->dv_standard &&
+					new_con_state->freesync_capable &&
 					vrefresh >= aconnector->min_vfreq &&
 					vrefresh <= aconnector->max_vfreq;
 

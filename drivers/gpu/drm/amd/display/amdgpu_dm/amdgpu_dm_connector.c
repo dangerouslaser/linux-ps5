@@ -878,7 +878,7 @@ EXPORT_IF_KUNIT(adjust_colour_depth_from_display_info);
 
 #ifdef CONFIG_X86_PS5
 /*
- * The PS5's HDMI converter can only output HDR at 4K60 as 12 bpc YCbCr 4:2:2,
+ * The PS5's HDMI converter outputs HDR as 12 bpc YCbCr 4:2:2,
  * which uses the same TMDS clock as 8 bpc RGB. Switch to it when userspace
  * left the colour format on auto; an explicit colour format request is
  * honoured as is.
@@ -902,7 +902,9 @@ static void dm_ps5_set_hdr_timing(struct dc_crtc_timing *timing,
 	if (state->colorspace != DRM_MODE_COLORIMETRY_BT2020_RGB &&
 	    state->colorspace != DRM_MODE_COLORIMETRY_BT2020_YCC)
 		return;
-	if (vic != 16 && vic != 97) /* 1080p60, 2160p60 */
+	/* 4:2:2 12 bpc keeps the TMDS clock at the pixel clock, so any CTA
+	 * mode the converter accepts can carry it. */
+	if (!vic || !isHdmiModeValid(mode, 0))
 		return;
 	if (drm_hdmi_infoframe_set_hdr_metadata(&frame, state) ||
 	    frame.eotf != HDMI_EOTF_SMPTE_ST2084)

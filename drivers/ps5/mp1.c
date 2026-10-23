@@ -1,0 +1,490 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
+#include <linux/module.h>
+#include <linux/miscdevice.h>
+#include <linux/delay.h>
+#include <linux/smp.h>
+#include <linux/ps5.h>
+#include <asm/amd/node.h>
+
+#define MP1_IOC_MAGIC		'M'
+
+#define MP1_BOOST_ENTER		_IO(MP1_IOC_MAGIC, 1)
+#define MP1_BOOST_EXIT		_IO(MP1_IOC_MAGIC, 2)
+
+#define CPU_MHZ_MIN		3200
+#define CPU_MHZ_MAX		3500
+
+#define GPU_MHZ_MIN		2000
+#define GPU_MHZ_MAX		2230
+
+#define MSR_ACCESS_DIS		BIT_ULL(62)
+
+#define MSR_DPM_CFG		0xC0011074
+#define MSR_DPM_WAC_ACC_INDEX	0xC0011076
+#define MSR_DPM_WAC_DATA	0xC0011077
+
+#define MP1_C2PMSG_56		0x3b109e0
+#define MP1_C2PMSG_57		0x3b109e4
+#define MP1_C2PMSG_58		0x3b109e8
+#define MP1_C2PMSG_59		0x3b109ec
+#define MP1_C2PMSG_66		0x3b10a08
+#define MP1_C2PMSG_72		0x3b10a20
+#define MP1_C2PMSG_81		0x3b10a44
+#define MP1_C2PMSG_82		0x3b10a48
+#define MP1_C2PMSG_90		0x3b10a68
+#define MP1_C2PMSG_96		0x3b10a80
+#define MP1_C2PMSG_98		0x3b10a88
+
+#define PPSMC_MSG_ConfigureS3PwrOffRegisterAddressHigh	0x16
+#define PPSMC_MSG_ConfigureS3PwrOffRegisterAddressLow	0x17
+#define PPSMC_MSG_UniversalModeEntry			0x22
+#define PPSMC_MSG_UniversalModeExit			0x23
+#define PPSMC_MSG_SleepEntry				0x24
+#define PPSMC_MSG_GfxCacWeightOperation			0x2F
+#define PPSMC_MSG_L3CacWeightOperation			0x30
+
+struct mp1_msg {
+	u32 arg;
+	u32 resp;
+	u32 resp_val;
+	u32 extra_arg;
+	u32 extra;
+};
+
+struct bapm_param_set {
+	u64 dpm_wac[21];
+	u32 l3_cacw[80];
+	u32 gfx_cacw[88];
+	u64 gfx_cacw_len;
+	u32 bapm_param[176][2];
+};
+
+static const struct bapm_param_set bapm_param_set_1 = {
+	.dpm_wac = {
+		0x0000bca79c8d0000, 0x0097000000000000, 0x007f0000000000ad,
+		0x00930000c700bb00, 0x000000e0cad5ee00, 0x0000c60099ca00d1,
+		0x00bab80000d8ff00, 0x000000000000a689, 0x0000b59d007300b1,
+		0x0000009600ad0000, 0x00a000b1f8000000, 0x00000000d400b200,
+		0x00a5000000980000, 0x0000969f00b49a00, 0xa48761a100b30000,
+		0x8500869500008f00, 0x7a009700008400a1, 0x00000000a90031ac,
+		0x00b7bd00a10000b5, 0xb000b2c8c3b1a500, 0xa600000000000000
+	},
+	.l3_cacw = {
+		[71] = 0x3ff80000
+	},
+	.gfx_cacw = {
+		[0]  = 0x17, 0x0, 0xa1,
+		[5]  = 0x3f0000,
+		[14] = 0x1c80000,
+		[19] = 0x22, 0x12,
+		[23] = 0x7019d, 0x28001e,
+		[28] = 0x35, 0x15d, 0x1ab, 0x7f0000,
+		[35] = 0xc4,
+		[49] = 0x310000,
+		[54] = 0x76
+	},
+	.gfx_cacw_len = 64,
+	.bapm_param = {
+		{1, 0x3d14a6f2}, {1, 0x00000000}, {1, 0x3ed4eb53}, {1, 0x3e16ae78},
+		{1, 0xbe4d4746}, {1, 0x3f34470b}, {1, 0x37178941}, {1, 0x3f726e59},
+		{1, 0x3f3ebeef}, {1, 0x00000000}, {1, 0x3f8e9ad0}, {1, 0xbc2c0ab6},
+		{1, 0x3d1582c2}, {1, 0x35937309}, {1, 0x3f0f45c5}, {1, 0x3ee17477},
+		{1, 0x00000000}, {1, 0x3f8e9ad0}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2},
+		{1, 0x387ba882}, {1, 0x40b1089a}, {1, 0x41751b15}, {1, 0x4287d1bc},
+		{1, 0x3fb89949}, {1, 0x411eefdf}, {1, 0xbc816b59}, {1, 0x3d41513a},
+		[49] =
+		{1, 0x41751b15}, {1, 0x4287d1bc}, {1, 0x3fb89949}, {1, 0x412d973c},
+		{1, 0xbc816b59}, {1, 0x3d41513a}, {1, 0x3e0654c8}, {1, 0xbe27b465},
+		{1, 0x3f2d3daa}, {1, 0x41751b15}, {1, 0x4287d1bc}, {1, 0x3fb89949},
+		{1, 0x4061d4cc}, {1, 0xbc816b59}, {1, 0x3d41513a}, {1, 0x3e97c980},
+		{1, 0xbf1d9856}, {1, 0x3f828e45}, {1, 0x41751b15}, {1, 0x4287d1bc},
+		{1, 0x3fb89949}, {1, 0x409c4b3c}, {1, 0xbc816b59}, {1, 0x3d41513a},
+		{1, 0x3e7a6107}, {1, 0xbeedd766}, {1, 0x3f67aa70}, {1, 0x41751b15},
+		{1, 0x4287d1bc}, {1, 0x3fb89949}, {1, 0x40ccf558}, {1, 0xbc816b59},
+		{1, 0x3d41513a}, {1, 0x3e600a8a}, {1, 0xbecbe79c}, {1, 0x3f5b627c},
+		{1, 0x41751b15}, {1, 0x4287d1bc}, {1, 0x3fb89949}, {1, 0x41050555},
+		{1, 0xbc816b59}, {1, 0x3d41513a}, {1, 0x3e379205}, {1, 0xbe94367e},
+		{1, 0x3f46233f}, {1, 0x3f726e59}, {1, 0x3f3ebeef}, {1, 0x00000000},
+		{1, 0x3f8e9ad0}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2}, {1, 0x3d14a6f2},
+		{1, 0x00000000}, {1, 0x3ed4eb53}, {1, 0x3f726e59}, {1, 0x3f3ebeef},
+		{1, 0x00000000}, {1, 0x3f8e9ad0}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2},
+		{1, 0x3d14a6f2}, {1, 0x00000000}, {1, 0x3ed4eb53}, {1, 0x3f726e59},
+		{1, 0x3f3ebeef}, {1, 0x00000000}, {1, 0x3f8e9ad0}, {1, 0xbc2c0ab6},
+		{1, 0x3d1582c2}, {1, 0x3d14a6f2}, {1, 0x00000000}, {1, 0x3ed4eb53},
+		{1, 0x3f726e59}, {1, 0x3f3ebeef}, {1, 0x00000000}, {1, 0x3f8e9ad0},
+		{1, 0xbc2c0ab6}, {1, 0x3d1582c2}, {1, 0x3d14a6f2}, {1, 0x00000000},
+		{1, 0x3ed4eb53}, {1, 0x3f726e59}, {1, 0x3f3ebeef}, {1, 0x00000000},
+		{1, 0x3f8e9ad0}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2}, {1, 0x3d14a6f2},
+		{1, 0x00000000}, {1, 0x3ed4eb53}, {1, 0x3f0f45c5}, {1, 0x3ee17477},
+		{1, 0x00000000}, {1, 0x3f8e9ad0}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2},
+		{1, 0x3f0f45c5}, {1, 0x3ee17477}, {1, 0x00000000}, {1, 0x3f8e9ad0},
+		{1, 0xbc2c0ab6}, {1, 0x3d1582c2}, {1, 0x3f0f45c5}, {1, 0x3ee17477},
+		{1, 0x00000000}, {1, 0x3f8e9ad0}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2},
+		{1, 0x3f0f45c5}, {1, 0x3ee17477}, {1, 0x00000000}, {1, 0x3f8e9ad0},
+		{1, 0xbc2c0ab6}, {1, 0x3d1582c2}, {1, 0x3f0f45c5}, {1, 0x3ee17477},
+		{1, 0x00000000}, {1, 0x3f8e9ad0}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2},
+		{1, 0x3c437be5}, {1, 0x00000000}, {1, 0x00000000}, {1, 0x00000000},
+		{1, 0x00000000}, {1, 0x00000000}, {1, 0x00000000}
+	}
+};
+
+static const struct bapm_param_set bapm_param_set_2 = {
+	.dpm_wac = {
+		0x0000c3adb08d0000, 0x00a800008d000000, 0xa000008e000000a6,
+		0x00000000c900a500, 0xc8d000d3b8daea00, 0x0000d000a3d200dc,
+		0x00bfc80000c6f100, 0x00fe00000000ad00, 0x0000abb300000000,
+		0x00008600000000cf, 0x00ae0095ff000000, 0x000000000000ac00,
+		0x00b00000008500ad, 0x0098849600b18000, 0xa2a38bac00b00000,
+		0x97007479000092ab, 0x0095a30000008f00, 0x000000b5000000a0,
+		0x0000c200a80000bd, 0x0000bcc1c4b2a300, 0xa700000000000000
+	},
+	.l3_cacw = {
+		[71] = 0x3ff80000,
+	},
+	.gfx_cacw = {
+		[2] = 0xefa,
+		[6] = 0x7bf,
+		[12] = 0x14d10000,
+		[14] = 0x287b0000,
+		[20] = 0x2f2,
+		[22] = 0x1085ffff, 0xcd80e51, 0x4b86145a,
+		[27] = 0x15a7,
+		[29] = 0x13c2, 0x2d02,
+		[34] = 0x78ad0000, 0x2ea0,
+		[54] = 0x257d, 0x8c8,
+		[58] = 0x799e,
+		[63] = 0x152,
+	},
+	.gfx_cacw_len = 64,
+	.bapm_param = {
+		{1, 0xbc22f028}, {1, 0x3e113314}, {1, 0xbe8d0750}, {1, 0x3e16ae78},
+		{1, 0xbe4d4746}, {1, 0x3f34470b}, {1, 0x3704564c}, {1, 0x3f516a34},
+		{1, 0x3f3fdd1c}, {1, 0x3f74f5de}, {1, 0x3dec9763}, {1, 0xbc2c0ab6},
+		{1, 0x3d1582c2}, {1, 0x367468e6}, {1, 0x3f059935}, {1, 0x3ef4cd95},
+		{1, 0x3f74f5de}, {1, 0x3d524dae}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2},
+		{1, 0x357db71b}, {1, 0x40b1089a}, {1, 0x41751b15}, {1, 0x4287d1bc},
+		{1, 0x3fb89949}, {1, 0x411eefdf}, {1, 0xbc816b59}, {1, 0x3d41513a},
+		[49] =
+		{1, 0x41751b15}, {1, 0x4287d1bc}, {1, 0x3fb89949}, {1, 0x412d973c},
+		{1, 0xbc816b59}, {1, 0x3d41513a}, {1, 0x3e0654c8}, {1, 0xbe27b465},
+		{1, 0x3f2d3daa}, {1, 0x41751b15}, {1, 0x4287d1bc}, {1, 0x3fb89949},
+		{1, 0x4061d4cc}, {1, 0xbc816b59}, {1, 0x3d41513a}, {1, 0x3e97c980},
+		{1, 0xbf1d9856}, {1, 0x3f828e45}, {1, 0x41751b15}, {1, 0x4287d1bc},
+		{1, 0x3fb89949}, {1, 0x409c4b3c}, {1, 0xbc816b59}, {1, 0x3d41513a},
+		{1, 0x3e7a6107}, {1, 0xbeedd766}, {1, 0x3f67aa70}, {1, 0x41751b15},
+		{1, 0x4287d1bc}, {1, 0x3fb89949}, {1, 0x40ccf558}, {1, 0xbc816b59},
+		{1, 0x3d41513a}, {1, 0x3e600a8a}, {1, 0xbecbe79c}, {1, 0x3f5b627c},
+		{1, 0x41751b15}, {1, 0x4287d1bc}, {1, 0x3fb89949}, {1, 0x41050555},
+		{1, 0xbc816b59}, {1, 0x3d41513a}, {1, 0x3e379205}, {1, 0xbe94367e},
+		{1, 0x3f46233f}, {1, 0x3f96c5af}, {1, 0x3eb99add}, {1, 0x3f85bb54},
+		{1, 0x3e6a30f6}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2}, {1, 0xbbda394d},
+		{1, 0x3dff4eb1}, {1, 0xbe8b186c}, {1, 0x3f8fbf3f}, {1, 0x3ee87500},
+		{1, 0x3f7c5aff}, {1, 0x3e92470e}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2},
+		{1, 0x396640ab}, {1, 0x3dad4b04}, {1, 0xbe6283c5}, {1, 0x3f8051ba},
+		{1, 0x3f13f766}, {1, 0x3f87a42b}, {1, 0x3e52acf5}, {1, 0xbc2c0ab6},
+		{1, 0x3d1582c2}, {1, 0xbbd8e837}, {1, 0x3e005ec6}, {1, 0xbe8c6197},
+		{1, 0x3f61d86e}, {1, 0x3f276f79}, {1, 0x3f7b0bf0}, {1, 0x3e25ca59},
+		{1, 0xbc2c0ab6}, {1, 0x3d1582c2}, {1, 0xbbc01a0e}, {1, 0x3dfb13b3},
+		{1, 0xbe84dd83}, {1, 0x3fa32142}, {1, 0x3ea341fd}, {1, 0x3f85d724},
+		{1, 0x3e8c3c1d}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2}, {1, 0xbaa01624},
+		{1, 0x3dbebfaf}, {1, 0xbe6f57f4}, {1, 0x3f43c147}, {1, 0x3e70fae5},
+		{1, 0x3f85bb54}, {1, 0x3dd02b85}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2},
+		{1, 0x3f364cb6}, {1, 0x3e936695}, {1, 0x3f7c5aff}, {1, 0x3e020645},
+		{1, 0xbc2c0ab6}, {1, 0x3d1582c2}, {1, 0x3f226119}, {1, 0x3ebb3dcd},
+		{1, 0x3f87a42b}, {1, 0x3dbb4468}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2},
+		{1, 0x3f1302b3}, {1, 0x3ed9fa9b}, {1, 0x3f7b0bf0}, {1, 0x3d935e88},
+		{1, 0xbc2c0ab6}, {1, 0x3d1582c2}, {1, 0x3f4cc495}, {1, 0x3e4cedab},
+		{1, 0x3f85d724}, {1, 0x3df94e6d}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2},
+		{1, 0x3c437be5}, {1, 0x3f3de47f}, {1, 0x3f40c129}, {1, 0x3f3cc9e7},
+		{1, 0x3f41350f}, {1, 0x3f3dcec6}, {1, 0x3f3e1c51}
+	}
+};
+
+static u32 pcirc_smn_read(u32 reg)
+{
+	u32 val = 0;
+	if (amd_smn_read(0, reg, &val)) {
+		panic("amd_smn_read failed");
+	}
+	return val;
+}
+
+static void pcirc_smn_write(u32 reg, u32 val)
+{
+	if (amd_smn_write(0, reg, val)) {
+		panic("amd_smn_write failed");
+	}
+}
+
+static int mp1fw_waitmsg(u32 reg, u8 msgid)
+{
+        int timeout = 0;
+
+        while (!pcirc_smn_read(reg)) {
+                udelay(10);
+                if (++timeout == 200000) {
+                        return 1;
+                }
+        }
+
+        if (timeout >= 10000) {
+                pr_err("[MP1] wait %d msec (msgid=0x%X)\n", timeout / 100, msgid);
+                return 0;
+        }
+
+        return 0;
+}
+
+static int mp1fw_sendmsg(struct mp1_msg *msg, u8 msgid)
+{
+	if (mp1fw_waitmsg(MP1_C2PMSG_90, msgid)) {
+		pr_err("[MP1ERROR] : %s: Error : busy msgid=0x%X, arg=0x%08X\n", __func__, msgid, msg->arg);
+		return -EBUSY;
+	}
+
+	pcirc_smn_write(MP1_C2PMSG_90, 0);
+	pcirc_smn_write(MP1_C2PMSG_82, msg->arg);
+	if (msg->extra == 1)
+		pcirc_smn_write(MP1_C2PMSG_81, msg->extra_arg);
+	pcirc_smn_write(MP1_C2PMSG_66, msgid);
+
+	if (mp1fw_waitmsg(MP1_C2PMSG_90, msgid)) {
+		pr_err("[MP1ERROR] : %s: Error : retry over msgid=0x%X, arg=0x%08X\n", __func__, msgid, msg->arg);
+		return -EBUSY;
+	}
+
+	u32 resp = pcirc_smn_read(MP1_C2PMSG_90);
+	u32 resp_val = pcirc_smn_read(MP1_C2PMSG_82);
+	if (resp != 1) {
+		pr_err("[MP1ERROR] : %s: invalid response msgid=0x%X, resp=0x%08X\n", __func__, msgid, resp);
+		return -EINVAL;
+	}
+
+	msg->resp = resp;
+	msg->resp_val = resp_val;
+
+	return 0;
+}
+
+static int mp1fw_test_sendmsg(struct mp1_msg *msg, uint8_t msgid)
+{
+	if (mp1fw_waitmsg(MP1_C2PMSG_96, msgid)) {
+		printk("[MP1ERROR] : %s: Error : busy msgid=0x%X, arg=0x%08X\n", __func__, msgid, msg->arg);
+		return -EBUSY;
+	}
+	pcirc_smn_write(MP1_C2PMSG_96, 0);
+	pcirc_smn_write(MP1_C2PMSG_98, msg->arg);
+	pcirc_smn_write(MP1_C2PMSG_72, msgid);
+	if (mp1fw_waitmsg(MP1_C2PMSG_96, msgid)) {
+		printk("[MP1ERROR] : %s: retry over msgid=0x%X, arg=0x%08X\n", __func__, msgid, msg->arg);
+		return -EBUSY;
+	}
+	u32 resp = pcirc_smn_read(MP1_C2PMSG_96);
+	u32 resp_val = pcirc_smn_read(MP1_C2PMSG_98);
+	if ((msgid != 0x75 && resp != 1) || (msgid == 0x75 && resp != 1 && resp != 0xf8)) {
+		printk("[MP1ERROR] : %s: invalid response msgid=0x%X, resp=0x%08X\n", __func__, msgid, resp);
+		return -EINVAL;
+	}
+
+	msg->resp = resp;
+	msg->resp_val = resp_val;
+
+	return 0;
+}
+
+static int mp1_set_wc_cpu(int mode)
+{
+	struct mp1_msg msg = {};
+	msg.arg = mode;
+	return mp1fw_test_sendmsg(&msg, 0x9b);
+}
+
+static int mp1_get_wc_cpu(int *mode)
+{
+	struct mp1_msg msg = {};
+	int ret;
+	ret = mp1fw_test_sendmsg(&msg, 0x9c);
+	*mode = msg.resp_val;
+	return ret;
+}
+
+static int mp1_configure_s3_pwr_off_reg_addr_high(u64 addr)
+{
+	struct mp1_msg msg = {};
+	msg.arg = addr >> 32;
+	return mp1fw_sendmsg(&msg, PPSMC_MSG_ConfigureS3PwrOffRegisterAddressHigh);
+}
+
+static int mp1_configure_s3_pwr_off_reg_addr_low(u64 addr)
+{
+	struct mp1_msg msg = {};
+	msg.arg = addr & 0xffffffff;
+	return mp1fw_sendmsg(&msg, PPSMC_MSG_ConfigureS3PwrOffRegisterAddressLow);
+}
+
+void mp1_set_pm1_addr(u64 addr)
+{
+	mp1_configure_s3_pwr_off_reg_addr_high(addr);
+	mp1_configure_s3_pwr_off_reg_addr_low(addr);
+}
+EXPORT_SYMBOL(mp1_set_pm1_addr);
+
+int mp1_set_sleep_entry(void)
+{
+	struct mp1_msg msg = {};
+	msg.arg = 3; /* S3 */
+	return mp1fw_sendmsg(&msg, PPSMC_MSG_SleepEntry);
+}
+EXPORT_SYMBOL(mp1_set_sleep_entry);
+
+static int mp1_universal_mode_enter(u32 *params)
+{
+	struct mp1_msg msg = {};
+
+	pcirc_smn_write(MP1_C2PMSG_56, params[1]);
+	pcirc_smn_write(MP1_C2PMSG_57, params[2]);
+	pcirc_smn_write(MP1_C2PMSG_58, params[3]);
+	pcirc_smn_write(MP1_C2PMSG_59, params[4]);
+
+	msg.arg = params[0];
+	return mp1fw_sendmsg(&msg, PPSMC_MSG_UniversalModeEntry);
+}
+
+static int mp1_universal_mode_exit(void)
+{
+	struct mp1_msg msg = {};
+	return mp1fw_sendmsg(&msg, PPSMC_MSG_UniversalModeExit);
+}
+
+static int mp1_bapm_set_gfx_cacw(int index, int weight)
+{
+	struct mp1_msg msg = {};
+	msg.arg = index | 0x20000;
+	msg.extra_arg = weight;
+	msg.extra = 1;
+	return mp1fw_sendmsg(&msg, PPSMC_MSG_GfxCacWeightOperation);
+}
+
+static int mp1_bapm_set_l3_cacw(int index, int weight)
+{
+	struct mp1_msg msg = {};
+	msg.arg = index | 0x20000;
+	msg.extra_arg = weight;
+	msg.extra = 1;
+	return mp1fw_sendmsg(&msg, PPSMC_MSG_L3CacWeightOperation);
+}
+
+static int mp1_bapm_write_param(int index, int param)
+{
+	struct mp1_msg msg = {};
+	msg.arg = index;
+	msg.extra_arg = param;
+	msg.extra = 1;
+	return mp1fw_sendmsg(&msg, 0x33);
+}
+
+static void update_bapm_weights_smp(void *info)
+{
+	u64 msr_dpm_cfg;
+	int i;
+
+	rdmsrq(MSR_DPM_CFG, msr_dpm_cfg);
+	wrmsrq(MSR_DPM_CFG, msr_dpm_cfg & ~MSR_ACCESS_DIS);
+
+	for (i = 0; i < 21; i++) {
+		wrmsrq(MSR_DPM_WAC_ACC_INDEX, i);
+		wrmsrq(MSR_DPM_WAC_DATA, bapm_param_set_2.dpm_wac[i]);
+	}
+
+	wrmsrq(MSR_DPM_CFG, msr_dpm_cfg);
+}
+
+static void mp1_set_bapm_param_set_all(void)
+{
+	int i;
+
+	on_each_cpu(update_bapm_weights_smp, NULL, 1);
+
+	for (i = 0; i < 80; i++) {
+		mp1_bapm_set_l3_cacw(i, bapm_param_set_2.l3_cacw[i]);
+	}
+
+	for (i = 0; i < bapm_param_set_2.gfx_cacw_len; i++) {
+		mp1_bapm_set_gfx_cacw(i, bapm_param_set_2.gfx_cacw[i]);
+	}
+
+	for (i = 0; i < 176; i++) {
+		if (bapm_param_set_2.bapm_param[i][0])
+			mp1_bapm_write_param(i, bapm_param_set_2.bapm_param[i][1]);
+	}
+}
+
+static long mp1_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	switch (cmd) {
+	case MP1_BOOST_ENTER:
+	{
+		u32 params[5];
+		params[0] = 0x0;
+		params[1] = 0x449cd;
+		params[2] = (GPU_MHZ_MIN << 16) | CPU_MHZ_MIN;
+		params[3] = (GPU_MHZ_MAX << 16) | CPU_MHZ_MAX;
+		params[4] = 0x25c6a3c8;
+		return mp1_universal_mode_enter(params);
+	}
+
+	case MP1_BOOST_EXIT:
+		return mp1_universal_mode_exit();
+
+	default:
+		return -ENOTTY;
+	}
+}
+
+static const struct file_operations mp1_fops = {
+	.owner = THIS_MODULE,
+	.unlocked_ioctl = mp1_ioctl,
+};
+
+static struct miscdevice mp1_misc_device = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "mp1",
+	.fops = &mp1_fops,
+};
+
+static int __init mp1_init(void)
+{
+	int ret;
+	int mode = 0;
+
+	mp1_universal_mode_exit();
+
+	pr_info("Set BAPM params\n");
+	mp1_get_wc_cpu(&mode);
+	if (mode != 1) {
+		mp1_set_wc_cpu(1);
+	}
+	mp1_set_bapm_param_set_all();
+
+	ret = misc_register(&mp1_misc_device);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static void __exit mp1_exit(void)
+{
+	misc_deregister(&mp1_misc_device);
+	mp1_universal_mode_exit();
+}
+
+module_init(mp1_init);
+module_exit(mp1_exit);
+
+MODULE_AUTHOR("Andy Nguyen");
+MODULE_DESCRIPTION("PlayStation 5 MP1 SMU driver");
+MODULE_LICENSE("GPL");

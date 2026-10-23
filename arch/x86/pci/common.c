@@ -57,14 +57,100 @@ int raw_pci_write(unsigned int domain, unsigned int bus, unsigned int devfn,
 	return -EINVAL;
 }
 
+#ifdef CONFIG_X86_PS5
+static DEFINE_RAW_SPINLOCK(pci_lock);
+
+static int sfc_read(unsigned int domain, unsigned int bus, unsigned int rid,
+						int reg, int len, u32 *val)
+{
+	int busno;
+	int slot;
+	int func;
+
+	busno = (rid >> 8) & 0xff;
+	slot = (rid & 0xff) >> 3;
+	func = rid & 0x07;
+
+	if (busno == 0 || busno == 32) {
+		raw_pci_write(domain, bus, 0, 0xd90, 4, 4);
+		raw_pci_write(domain, bus, 0, 0xd80, 4, (32 << 24) | (slot << 19) | (func << 16) | (reg & 0xf80));
+		return raw_pci_read(domain, bus, 0, (reg & 0x7f) | 0xf80, len, val);
+	} else if (busno < 32) {
+		raw_pci_write(domain, bus, 0, 0xd10, 4, busno == 1 ? 4 : 5);
+		raw_pci_write(domain, bus, 0, 0xd00, 4, (busno << 24) | (slot << 19) | (func << 16) | (reg & 0xf80));
+		return raw_pci_read(domain, bus, 0, (reg & 0x7f) | 0xf00, len, val);
+	} else {
+		panic("wrong bus number");
+	}
+}
+
+static int sfc_write(unsigned int domain, unsigned int bus, unsigned int rid,
+						int reg, int len, u32 val)
+{
+	int busno;
+	int slot;
+	int func;
+
+	busno = (rid >> 8) & 0xff;
+	slot = (rid & 0xff) >> 3;
+	func = rid & 0x07;
+
+	if (busno == 0 || busno == 32) {
+		raw_pci_write(domain, bus, 0, 0xd90, 4, 4);
+		raw_pci_write(domain, bus, 0, 0xd80, 4, (32 << 24) | (slot << 19) | (func << 16) | (reg & 0xf80));
+		return raw_pci_write(domain, bus, 0, (reg & 0x7f) | 0xf80, len, val);
+	} else if (busno < 32) {
+		raw_pci_write(domain, bus, 0, 0xd10, 4, busno == 1 ? 4 : 5);
+		raw_pci_write(domain, bus, 0, 0xd00, 4, (busno << 24) | (slot << 19) | (func << 16) | (reg & 0xf80));
+		return raw_pci_write(domain, bus, 0, (reg & 0x7f) | 0xf00, len, val);
+	} else {
+		panic("wrong bus number");
+	}
+}
+#endif
+
 static int pci_read(struct pci_bus *bus, unsigned int devfn, int where, int size, u32 *value)
 {
+	int ret;
+	unsigned long flags;
+
+#ifdef CONFIG_X86_PS5
+	if (pci_ari_enabled(bus)) {
+		u32 rid = 0;
+		raw_spin_lock_irqsave(&pci_lock, flags);
+		raw_pci_read(pci_domain_nr(bus), bus->number, devfn, 0x150, 2, &rid);
+		if (rid != 0 && rid != 0xffff) {
+			ret = sfc_read(pci_domain_nr(bus), bus->number, rid, where, size, value);
+			raw_spin_unlock_irqrestore(&pci_lock, flags);
+			return ret;
+		}
+		raw_spin_unlock_irqrestore(&pci_lock, flags);
+	}
+#endif
+
 	return raw_pci_read(pci_domain_nr(bus), bus->number,
 				 devfn, where, size, value);
 }
 
 static int pci_write(struct pci_bus *bus, unsigned int devfn, int where, int size, u32 value)
 {
+	int ret;
+	unsigned long flags;
+
+#ifdef CONFIG_X86_PS5
+	if (pci_ari_enabled(bus)) {
+		u32 rid = 0;
+		raw_spin_lock_irqsave(&pci_lock, flags);
+		raw_pci_read(pci_domain_nr(bus), bus->number, devfn, 0x150, 2, &rid);
+		if (rid != 0 && rid != 0xffff) {
+			ret = sfc_write(pci_domain_nr(bus), bus->number, rid, where, size, value);
+			raw_spin_unlock_irqrestore(&pci_lock, flags);
+			return ret;
+		}
+		raw_spin_unlock_irqrestore(&pci_lock, flags);
+	}
+#endif
+
 	return raw_pci_write(pci_domain_nr(bus), bus->number,
 				  devfn, where, size, value);
 }

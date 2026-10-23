@@ -98,8 +98,11 @@ static const struct link_encoder_funcs dcn201_link_enc_funcs = {
 	.disable_hpd = dcn10_link_encoder_disable_hpd,
 	.is_dig_enabled = dcn10_is_dig_enabled,
 	.destroy = dcn10_link_encoder_destroy,
+#ifndef CONFIG_X86_PS5
+	/* Ignore this to prevent blackscreen. */
 	.fec_set_enable = enc2_fec_set_enable,
 	.fec_set_ready = enc2_fec_set_ready,
+#endif
 	.get_dig_frontend = dcn10_get_dig_frontend,
 	.fec_is_active = enc2_fec_is_active,
 	.is_in_alt_mode = dcn201_link_encoder_is_in_alt_mode,

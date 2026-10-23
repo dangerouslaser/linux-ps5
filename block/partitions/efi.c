@@ -90,6 +90,9 @@
 #include "check.h"
 #include "efi.h"
 
+#define PS5_M2_PART44_LBA_OFFSET 34224
+#define PS5_M2_MBR_LBA 65536
+
 /* This allows a kernel command line option 'gpt' to override
  * the test for invalid PMBR.  Not __initdata because reloading
  * the partition tables happens after init too.
@@ -133,6 +136,12 @@ efi_crc32(const void *buf, unsigned long len)
  */
 static u64 last_lba(struct gendisk *disk)
 {
+#ifdef CONFIG_X86_PS5
+	if (strncmp(disk->disk_name, "nvme", 4) == 0) {
+		return div_u64(bdev_nr_bytes(disk->part0),
+			       queue_logical_block_size(disk->queue)) - 1ULL - PS5_M2_PART44_LBA_OFFSET;
+	} else
+#endif
 	return div_u64(bdev_nr_bytes(disk->part0),
 		       queue_logical_block_size(disk->queue)) - 1ULL;
 }
@@ -143,8 +152,14 @@ static inline int pmbr_part_valid(gpt_mbr_record *part)
 		goto invalid;
 
 	/* set to 0x00000001 (i.e., the LBA of the GPT Partition Header) */
+#ifdef CONFIG_X86_PS5
+	if (le32_to_cpu(part->starting_lba) != GPT_PRIMARY_PARTITION_TABLE_LBA &&
+	    le32_to_cpu(part->starting_lba) != PS5_M2_MBR_LBA + GPT_PRIMARY_PARTITION_TABLE_LBA)
+		goto invalid;
+#else
 	if (le32_to_cpu(part->starting_lba) != GPT_PRIMARY_PARTITION_TABLE_LBA)
 		goto invalid;
+#endif
 
 	return GPT_MBR_PROTECTIVE;
 invalid:
@@ -599,6 +614,11 @@ static int find_valid_gpt(struct parsed_partitions *state, gpt_header **gpt,
 		if (!legacymbr)
 			goto fail;
 
+#ifdef CONFIG_X86_PS5
+		if (strncmp(state->disk->disk_name, "nvme", 4) == 0) {
+			read_lba(state, PS5_M2_MBR_LBA, (u8 *)legacymbr, sizeof(*legacymbr));
+		} else
+#endif
 		read_lba(state, 0, (u8 *)legacymbr, sizeof(*legacymbr));
 		good_pmbr = is_pmbr_valid(legacymbr, total_sectors);
 		kfree(legacymbr);
@@ -611,6 +631,12 @@ static int find_valid_gpt(struct parsed_partitions *state, gpt_header **gpt,
 						"protective" : "hybrid");
 	}
 
+#ifdef CONFIG_X86_PS5
+	if (strncmp(state->disk->disk_name, "nvme", 4) == 0) {
+		good_pgpt = is_gpt_valid(state, PS5_M2_MBR_LBA + GPT_PRIMARY_PARTITION_TABLE_LBA,
+					 &pgpt, &pptes);
+	} else
+#endif
 	good_pgpt = is_gpt_valid(state, GPT_PRIMARY_PARTITION_TABLE_LBA,
 				 &pgpt, &pptes);
         if (good_pgpt)

@@ -1720,6 +1720,11 @@ static int pirq_enable_irq(struct pci_dev *dev)
 {
 	u8 pin = 0;
 
+#ifdef CONFIG_X86_PS5
+	/* Legacy IRQ is not available. */
+	return 0;
+#endif
+
 	pci_read_config_byte(dev, PCI_INTERRUPT_PIN, &pin);
 	if (pin && !pcibios_lookup_irq(dev, 1)) {
 		char *msg = "";
@@ -1801,6 +1806,11 @@ bool mp_should_keep_irq(struct device *dev)
 
 static void pirq_disable_irq(struct pci_dev *dev)
 {
+#ifdef CONFIG_X86_PS5
+	/* Legacy IRQ is not available. */
+	return;
+#endif
+
 	if (io_apic_assign_pci_irqs && !mp_should_keep_irq(&dev->dev) &&
 	    dev->irq_managed && dev->irq) {
 		mp_unmap_irq(dev->irq);

@@ -486,6 +486,7 @@ static int k10temp_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			break;
 		case 0x31:	/* Zen2 Threadripper */
 		case 0x47:	/* Cyan Skillfish */
+		case 0x48:	/* PS5 */
 		case 0x60:	/* Renoir */
 		case 0x68:	/* Lucienne */
 		case 0x71:	/* Zen2 */

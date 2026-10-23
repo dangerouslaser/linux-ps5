@@ -19,6 +19,7 @@
 #include "xhci.h"
 #include "xhci-trace.h"
 #include "xhci-pci.h"
+#include "xhci-ps5.h"
 
 #define SSIC_PORT_NUM		2
 #define SSIC_PORT_CFG2		0x880c
@@ -94,6 +95,9 @@
 #define PCI_DEVICE_ID_ASMEDIA_2142_XHCI			0x2142
 #define PCI_DEVICE_ID_ASMEDIA_3042_XHCI			0x3042
 #define PCI_DEVICE_ID_ASMEDIA_3242_XHCI			0x3242
+
+#define PCI_VENDOR_ID_SONY						0x104d
+#define PCI_DEVICE_ID_PS5_SALINA_XHCI			0x9108
 
 static const char hcd_name[] = "xhci_hcd";
 
@@ -513,6 +517,13 @@ static void xhci_pci_quirks(struct device *dev, struct xhci_hcd *xhci)
 	if (xhci->hci_version >= 0x120)
 		xhci->quirks |= XHCI_DEFAULT_PM_RUNTIME_ALLOW;
 
+	if (pdev->vendor == PCI_VENDOR_ID_SONY &&
+	    pdev->device == PCI_DEVICE_ID_PS5_SALINA_XHCI) {
+		xhci_dbg_trace(xhci, trace_xhci_dbg_init, "%s detected Salina USB PHY setting quirk", __func__);
+		xhci->quirks |= XHCI_PS5_SALINA_PHY;
+		xhci->quirks |= XHCI_WRITE_64_HI_LO;
+	}
+
 	if (xhci->quirks & XHCI_RESET_ON_RESUME)
 		xhci_dbg_trace(xhci, trace_xhci_dbg_quirks,
 				"QUIRK: Resetting on resume");
@@ -576,6 +587,15 @@ static int xhci_pci_setup(struct usb_hcd *hcd)
 
 	/* imod_interval is the interrupt moderation value in nanoseconds. */
 	xhci->imod_interval = 40000;
+
+#if 0
+    if (pdev->vendor == PCI_VENDOR_ID_SONY &&
+		pdev->device == PCI_DEVICE_ID_PS5_SALINA_XHCI) {
+		retval = xhci_salina_init(pdev);
+		if (retval)
+			return retval;
+    }
+#endif
 
 	retval = xhci_gen_setup(hcd, xhci_pci_quirks);
 	if (retval)
@@ -726,6 +746,11 @@ void xhci_pci_remove(struct pci_dev *dev)
 
 	xhci = hcd_to_xhci(pci_get_drvdata(dev));
 	set_power_d3 = xhci->quirks & XHCI_SPURIOUS_WAKEUP;
+
+	if(xhci->quirks & XHCI_PS5_SALINA_PHY) {
+		salina_stop_xhci_poller();
+		xhci_salina_exit();
+	}
 
 	xhci->xhc_state |= XHCI_STATE_REMOVING;
 
@@ -959,6 +984,7 @@ static const struct pci_device_id pci_ids[] = {
 	/* handle any USB 3.0 xHCI controller */
 	{ PCI_DEVICE_CLASS(PCI_CLASS_SERIAL_USB_XHCI, ~0),
 	},
+	{ PCI_DEVICE(PCI_VENDOR_ID_SONY, PCI_DEVICE_ID_PS5_SALINA_XHCI) },
 	{ /* end: all zeroes */ }
 };
 MODULE_DEVICE_TABLE(pci, pci_ids);

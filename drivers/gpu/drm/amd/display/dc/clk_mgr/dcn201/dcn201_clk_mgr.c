@@ -214,4 +214,8 @@ void dcn201_clk_mgr_construct(struct dc_context *ctx,
 			clk_mgr->dfs_bypass_enabled = true;
 
 	dce_clock_read_ss_info(clk_mgr);
+#ifdef CONFIG_X86_PS5
+	clk_mgr->ss_on_dprefclk = false;
+	clk_mgr->dprefclk_ss_percentage = 0;
+#endif
 }

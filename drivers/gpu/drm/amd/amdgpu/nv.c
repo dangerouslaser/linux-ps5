@@ -830,6 +830,10 @@ static int nv_common_early_init(struct amdgpu_ip_block *ip_block)
 		adev->cg_flags = 0;
 		adev->pg_flags = 0;
 		adev->external_rev_id = adev->rev_id + 0x82;
+#ifdef CONFIG_X86_PS5
+		/* Hardcode bc250's id. Remove when mesa's patch is widely available. */
+		adev->external_rev_id = 0x84;
+#endif
 		break;
 	case IP_VERSION(10, 3, 6):
 		adev->cg_flags = AMD_CG_SUPPORT_GFX_MGCG |

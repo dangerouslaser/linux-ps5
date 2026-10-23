@@ -2803,6 +2803,14 @@ static int next_ari_fn(struct pci_bus *bus, struct pci_dev *dev, int fn)
 	u16 cap = 0;
 	unsigned int next_fn;
 
+#ifdef CONFIG_X86_PS5
+	/* ARI capability is broken, so we just assume contiguous functions until 45. */
+	if (fn < 45)
+		return fn + 1;
+	else
+		return -ENODEV;
+#endif
+
 	if (!dev)
 		return -ENODEV;
 

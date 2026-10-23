@@ -27,6 +27,7 @@
 #include "xhci-trace.h"
 #include "xhci-debugfs.h"
 #include "xhci-dbgcap.h"
+#include "xhci-ps5.h"
 
 #define DRIVER_AUTHOR "Sarah Sharp"
 #define DRIVER_DESC "'eXtensible' Host Controller (xHC) Driver"
@@ -184,6 +185,10 @@ int xhci_reset(struct xhci_hcd *xhci, u64 timeout_us)
 	u32 command;
 	u32 state;
 	int ret;
+
+	if (xhci->quirks & XHCI_PS5_SALINA_PHY) {
+		return xhci_salina_reset(xhci, 5000);
+	}
 
 	state = readl(&xhci->op_regs->status);
 
@@ -608,6 +613,10 @@ static int xhci_run_finished(struct xhci_hcd *xhci)
 		xhci_ring_cmd_db(xhci);
 
 	spin_unlock_irqrestore(&xhci->lock, flags);
+
+	if(xhci->quirks & XHCI_PS5_SALINA_PHY) {
+		salina_start_xhci_poller(xhci);
+	}
 
 	return 0;
 }

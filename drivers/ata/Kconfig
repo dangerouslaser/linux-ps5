@@ -298,6 +298,18 @@ config AHCI_QORIQ
 
 	  If unsure, say N.
 
+config AHCI_SALINA
+	tristate "Sony PlayStation 5 Salina SATA / BD-ROM AHCI support"
+	depends on PCI
+	depends on X86_PS5 || COMPILE_TEST
+	select SATA_HOST
+	help
+	  This option enables support for the PlayStation 5 "Salina" SATA
+	  AHCI controller (PCI 104d:9105 / 104d:9106) that fronts the
+	  internal Blu-ray drive.
+
+	  If unsure, say N.
+
 config SATA_FSL
 	tristate "Freescale 3.0Gbps SATA support"
 	depends on FSL_SOC || COMPILE_TEST

@@ -61,6 +61,9 @@ scm_version()
 	local no_dirty=false
 	local tag
 
+	# Do not add any suffix for ps5-linux.
+	return
+
 	while [ $# -gt 0 ];
 	do
 		case "$1" in

@@ -122,7 +122,11 @@ unsigned long pci_hotplug_bus_size = DEFAULT_HOTPLUG_BUS_SIZE;
 
 
 /* PCIe MPS/MRRS strategy; can be overridden by kernel command-line param */
+#ifdef CONFIG_X86_PS5
+enum pcie_bus_config_types pcie_bus_config = PCIE_BUS_PERFORMANCE;
+#else
 enum pcie_bus_config_types pcie_bus_config = PCIE_BUS_DEFAULT;
+#endif
 
 /*
  * The default CLS is used if arch didn't set CLS explicitly and not

@@ -40,6 +40,10 @@
 #include <linux/suspend.h>
 #include <linux/vga_switcheroo.h>
 
+#ifdef CONFIG_X86_PS5
+#include <linux/ps5.h>
+#endif
+
 #include "amdgpu.h"
 #include "amdgpu_amdkfd.h"
 #include "amdgpu_dma_buf.h"
@@ -1125,6 +1129,12 @@ module_param_named(hdmi_hpd_debounce_delay_ms, amdgpu_hdmi_hpd_debounce_delay_ms
 MODULE_PARM_DESC(ptl, "Enable PTL (-1 = auto, 0 = disable (default), 1 = enable, 2 = permanently disable)");
 module_param_named(ptl, amdgpu_ptl, int, 0444);
 
+#ifdef CONFIG_X86_PS5
+int amdgpu_force_1080p = 0;
+MODULE_PARM_DESC(force_1080p, "Force 1080p (0 = disabled (default), 1 = enabled)");
+module_param_named(force_1080p, amdgpu_force_1080p, int, 0444);
+#endif
+
 /* These devices are not supported by amdgpu.
  * They are supported by the mach64, r128, radeon drivers
  */
@@ -2174,6 +2184,9 @@ static const struct pci_device_id pciidlist[] = {
 	{ PCI_DEVICE(0x1002, 0x7410), .driver_data = CHIP_ALDEBARAN },
 
 	/* CYAN_SKILLFISH */
+#ifdef CONFIG_X86_PS5
+	{ PCI_DEVICE(0x1002, 0x13DA), .driver_data = CHIP_CYAN_SKILLFISH|AMD_IS_APU },
+#endif
 	{ PCI_DEVICE(0x1002, 0x13DB), .driver_data = CHIP_CYAN_SKILLFISH|AMD_IS_APU },
 	{ PCI_DEVICE(0x1002, 0x13F9), .driver_data = CHIP_CYAN_SKILLFISH|AMD_IS_APU },
 	{ PCI_DEVICE(0x1002, 0x13FA), .driver_data = CHIP_CYAN_SKILLFISH|AMD_IS_APU },
@@ -2391,6 +2404,11 @@ static int amdgpu_pci_probe(struct pci_dev *pdev,
 	unsigned long flags = ent->driver_data;
 	int ret, retry = 0, i;
 	bool supports_atomic = false;
+
+#ifdef CONFIG_X86_PS5
+	if (!spcie_is_initialized())
+		return -EPROBE_DEFER;
+#endif
 
 	if ((pdev->class >> 8) == PCI_CLASS_DISPLAY_VGA ||
 	    (pdev->class >> 8) == PCI_CLASS_DISPLAY_OTHER) {

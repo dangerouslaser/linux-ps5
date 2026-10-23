@@ -1026,6 +1026,12 @@ bool link_decide_link_settings(struct dc_stream_state *stream,
 		decide_dp_link_settings(link, link_setting, req_bw);
 	}
 
+#ifdef CONFIG_X86_PS5
+	/* Hardcode HBR3x4 link setting. */
+	link_setting->link_rate = LINK_RATE_HIGH3;
+	link_setting->lane_count = LANE_COUNT_FOUR;
+#endif
+
 	return link_setting->lane_count != LANE_COUNT_UNKNOWN &&
 			link_setting->link_rate != LINK_RATE_UNKNOWN;
 }
@@ -1466,6 +1472,8 @@ void dpcd_set_source_specific_data(struct dc_link *link)
 				(uint8_t *)(&amd_device_id),
 				sizeof(amd_device_id));
 
+#ifndef CONFIG_X86_PS5
+		/* Ignore unsupported dpcd address. */
 		if (link->ctx->dce_version >= DCN_VERSION_2_0 &&
 			link->dc->caps.min_horizontal_blanking_period != 0) {
 
@@ -1475,6 +1483,7 @@ void dpcd_set_source_specific_data(struct dc_link *link)
 				DP_SOURCE_MINIMUM_HBLANK_SUPPORTED, (uint8_t *)(&hblank_size),
 				sizeof(hblank_size));
 		}
+#endif
 		DC_TRACE_LEVEL_MESSAGE(DAL_TRACE_LEVEL_INFORMATION,
 							WPP_BIT_FLAG_DC_DETECTION_DP_CAPS,
 							"result=%u link_index=%u enum dce_version=%d DPCD=0x%04X min_hblank=%u branch_dev_id=0x%x branch_dev_name='%c%c%c%c%c%c'",

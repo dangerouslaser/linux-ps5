@@ -272,6 +272,10 @@ extern uint amdgpu_hdmi_hpd_debounce_delay_ms;
 #define AMDGPU_SG_THRESHOLD			(256*1024*1024)
 #define AMDGPU_WAIT_IDLE_TIMEOUT_IN_MS	        3000
 #define AMDGPU_MAX_USEC_TIMEOUT			100000	/* 100 ms */
+#ifdef CONFIG_X86_PS5
+extern int amdgpu_force_1080p;
+#endif
+
 #define AMDGPU_FENCE_JIFFIES_TIMEOUT		(HZ / 2)
 #define AMDGPU_DEBUGFS_MAX_COMPONENTS		32
 #define AMDGPUFB_CONN_LIMIT			4

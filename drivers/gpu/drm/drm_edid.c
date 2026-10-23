@@ -2242,6 +2242,10 @@ static void connector_bad_edid(struct drm_connector *connector,
 		edid_block_dump(KERN_DEBUG, edid + i, i);
 }
 
+#ifdef CONFIG_X86_PS5
+extern struct drm_edid *real_edid;
+#endif
+
 /* Get override or firmware EDID */
 static const struct drm_edid *drm_edid_override_get(struct drm_connector *connector)
 {
@@ -2256,6 +2260,11 @@ static const struct drm_edid *drm_edid_override_get(struct drm_connector *connec
 
 	if (!override)
 		override = drm_edid_load_firmware(connector);
+
+#ifdef CONFIG_X86_PS5
+	if (IS_ERR(override) && real_edid)
+		override = drm_edid_dup(real_edid);
+#endif
 
 	return IS_ERR(override) ? NULL : override;
 }

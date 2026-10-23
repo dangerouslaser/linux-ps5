@@ -31,6 +31,11 @@ struct clock_event_device *global_clock_event;
  */
 static bool __init use_pit(void)
 {
+#ifdef CONFIG_X86_PS5
+	/* PIT is not available. */
+	return false;
+#endif
+
 	if (!boot_cpu_has(X86_FEATURE_TSC))
 		return true;
 

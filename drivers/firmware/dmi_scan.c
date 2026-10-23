@@ -957,6 +957,14 @@ const char *dmi_get_system_info(int field)
 }
 EXPORT_SYMBOL(dmi_get_system_info);
 
+#ifdef CONFIG_X86_PS5
+void dmi_set_system_info(int field, const char *str)
+{
+	dmi_ident[field] = str;
+}
+EXPORT_SYMBOL(dmi_set_system_info);
+#endif
+
 /**
  * dmi_name_in_serial - Check if string is in the DMI product serial information
  * @str: string to check for

@@ -3312,7 +3312,8 @@ static int __init early_amd_iommu_init(void)
 	if (!is_kdump_kernel() || amd_iommu_disabled)
 		disable_iommus();
 
-	if (amd_iommu_irq_remap)
+	/* The PS5 has no IOAPIC. */
+	if (amd_iommu_irq_remap && !IS_ENABLED(CONFIG_X86_PS5))
 		amd_iommu_irq_remap = check_ioapic_information();
 
 	if (amd_iommu_irq_remap) {

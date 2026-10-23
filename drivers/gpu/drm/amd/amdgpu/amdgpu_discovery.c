@@ -2909,6 +2909,10 @@ static int amdgpu_discovery_set_mm_ip_blocks(struct amdgpu_device *adev)
 				amdgpu_device_ip_block_add(adev, &jpeg_v2_0_ip_block);
 			break;
 		case IP_VERSION(2, 0, 3):
+			if (IS_ENABLED(CONFIG_X86_PS5)) {
+				adev->vcn.num_vcn_inst = 1;
+				amdgpu_device_ip_block_add(adev, &vcn_v2_0_ip_block);
+			}
 			break;
 		case IP_VERSION(2, 5, 0):
 			amdgpu_device_ip_block_add(adev, &vcn_v2_5_ip_block);
@@ -3321,6 +3325,9 @@ int amdgpu_discovery_set_ip_blocks(struct amdgpu_device *adev)
 			adev->ip_versions[SMUIO_HWIP][0] = IP_VERSION(11, 0, 8);
 			adev->ip_versions[GC_HWIP][0] = IP_VERSION(10, 1, 3);
 			adev->ip_versions[UVD_HWIP][0] = IP_VERSION(2, 0, 3);
+#ifdef CONFIG_X86_PS5
+			adev->ip_versions[DCE_HWIP][0] = IP_VERSION(2, 0, 3);
+#endif
 		}
 		break;
 	default:

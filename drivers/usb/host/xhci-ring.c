@@ -61,6 +61,8 @@
 
 #include "xhci.h"
 #include "xhci-trace.h"
+#include "xhci-ring.h"
+#include "xhci-ps5.h"
 
 static int queue_command(struct xhci_hcd *xhci, struct xhci_command *cmd,
 			 u32 field1, u32 field2,
@@ -3089,12 +3091,14 @@ static void xhci_clear_interrupt_pending(struct xhci_interrupter *ir)
  * Handle all OS-owned events on an interrupter event ring. It may drop
  * and reaquire xhci->lock between event processing.
  */
-static int xhci_handle_events(struct xhci_hcd *xhci, struct xhci_interrupter *ir,
+int xhci_handle_events(struct xhci_hcd *xhci, struct xhci_interrupter *ir,
 			      bool skip_events)
 {
 	int event_loop = 0;
 	int err = 0;
 	u64 temp;
+	int iters = 0;
+	const int max_iters = 32;
 
 	xhci_clear_interrupt_pending(ir);
 
@@ -3137,11 +3141,27 @@ static int xhci_handle_events(struct xhci_hcd *xhci, struct xhci_interrupter *ir
 
 		if (err)
 			break;
+
+		if (xhci->quirks & XHCI_PS5_SALINA_PHY) {
+			if (++iters > max_iters) {
+	            xhci_warn(xhci,
+	                  "Salina: event ring appears stuck after %d TRBs\n",
+	                  iters);
+	            goto salina_stuck;
+	        }
+		}
 	}
 
 	xhci_update_erst_dequeue(xhci, ir, true);
 
 	return 0;
+
+salina_stuck:
+    /* mark host dying so we don't deadlock future URBs */
+    xhci->xhc_state |= XHCI_STATE_DYING;
+
+    xhci_update_erst_dequeue(xhci, ir, true);
+    return -EIO;
 }
 
 /*

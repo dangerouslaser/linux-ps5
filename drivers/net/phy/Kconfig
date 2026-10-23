@@ -492,3 +492,4 @@ config XILINX_GMII2RGMII
 	  Ethernet physical media devices and the Gigabit Ethernet controller.
 
 endif # PHYLIB
+source "drivers/net/phy/mts/Kconfig"

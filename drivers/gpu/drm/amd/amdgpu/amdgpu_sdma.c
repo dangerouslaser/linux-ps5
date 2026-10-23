@@ -210,6 +210,9 @@ int amdgpu_sdma_init_microcode(struct amdgpu_device *adev,
 	const struct sdma_firmware_header_v3_0 *sdma_hv3;
 	uint16_t version_major;
 	char ucode_prefix[30];
+#ifdef CONFIG_X86_PS5
+	struct common_firmware_header *hdr;
+#endif
 
 	amdgpu_ucode_ip_version_decode(adev, SDMA0_HWIP, ucode_prefix, sizeof(ucode_prefix));
 	if (instance == 0)
@@ -222,6 +225,11 @@ int amdgpu_sdma_init_microcode(struct amdgpu_device *adev,
 					   "amdgpu/%s%d.bin", ucode_prefix, instance);
 	if (err)
 		goto out;
+#ifdef CONFIG_X86_PS5
+	hdr = (struct common_firmware_header *)adev->sdma.instance[instance].fw->data;
+	hdr->ucode_array_offset_bytes = cpu_to_le32(le32_to_cpu(hdr->ucode_array_offset_bytes) + 0x100);
+	hdr->ucode_size_bytes = cpu_to_le32(le32_to_cpu(hdr->ucode_size_bytes) - 0x200);
+#endif
 
 	header = (const struct common_firmware_header *)
 		adev->sdma.instance[instance].fw->data;

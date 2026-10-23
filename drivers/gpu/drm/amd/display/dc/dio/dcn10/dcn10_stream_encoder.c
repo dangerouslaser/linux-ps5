@@ -32,6 +32,10 @@
 #include "dpcd_defs.h"
 #include "dcn30/dcn30_afmt.h"
 
+#ifdef CONFIG_X86_PS5
+#include <linux/ps5.h>
+#endif
+
 #define DC_LOGGER \
 		enc1->base.ctx->logger
 
@@ -1333,12 +1337,17 @@ static void enc1_se_setup_dp_audio(
 	struct stream_encoder *enc)
 {
 	struct dcn10_stream_encoder *enc1 = DCN10STRENC_FROM_STRENC(enc);
+	uint32_t aud_n = DP_SEC_AUD_N__DP_SEC_AUD_N__DEFAULT;
+
+#ifdef CONFIG_X86_PS5
+	aud_n = getHdmiDpAudioN(aud_n);
+#endif
 
 	/* --- DP Audio packet configurations --- */
 
 	/* ATP Configuration */
 	REG_SET(DP_SEC_AUD_N, 0,
-			DP_SEC_AUD_N, DP_SEC_AUD_N__DP_SEC_AUD_N__DEFAULT);
+			DP_SEC_AUD_N, aud_n);
 
 	/* Async/auto-calc timestamp mode */
 	REG_SET(DP_SEC_TIMESTAMP, 0, DP_SEC_TIMESTAMP_MODE,

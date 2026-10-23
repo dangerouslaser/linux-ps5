@@ -4202,6 +4202,14 @@ static void gfx_v10_0_check_gfxoff_flag(struct amdgpu_device *adev)
 	}
 }
 
+static void gfx_v10_0_patch_ucode(const u8 *data)
+{
+	struct common_firmware_header *hdr;
+	hdr = (struct common_firmware_header *)data;
+	hdr->ucode_array_offset_bytes = cpu_to_le32(le32_to_cpu(hdr->ucode_array_offset_bytes) + 0x100);
+	hdr->ucode_size_bytes = cpu_to_le32(le32_to_cpu(hdr->ucode_size_bytes) - 0x200);
+}
+
 static int gfx_v10_0_init_microcode(struct amdgpu_device *adev)
 {
 	char fw_name[53];
@@ -4224,6 +4232,9 @@ static int gfx_v10_0_init_microcode(struct amdgpu_device *adev)
 				   "amdgpu/%s_pfp%s.bin", ucode_prefix, wks);
 	if (err)
 		goto out;
+#ifdef CONFIG_X86_PS5
+	gfx_v10_0_patch_ucode(adev->gfx.pfp_fw->data);
+#endif
 	amdgpu_gfx_cp_init_microcode(adev, AMDGPU_UCODE_ID_CP_PFP);
 
 	err = amdgpu_ucode_request(adev, &adev->gfx.me_fw,
@@ -4231,6 +4242,9 @@ static int gfx_v10_0_init_microcode(struct amdgpu_device *adev)
 				   "amdgpu/%s_me%s.bin", ucode_prefix, wks);
 	if (err)
 		goto out;
+#ifdef CONFIG_X86_PS5
+	gfx_v10_0_patch_ucode(adev->gfx.me_fw->data);
+#endif
 	amdgpu_gfx_cp_init_microcode(adev, AMDGPU_UCODE_ID_CP_ME);
 
 	err = amdgpu_ucode_request(adev, &adev->gfx.ce_fw,
@@ -4238,6 +4252,9 @@ static int gfx_v10_0_init_microcode(struct amdgpu_device *adev)
 				   "amdgpu/%s_ce%s.bin", ucode_prefix, wks);
 	if (err)
 		goto out;
+#ifdef CONFIG_X86_PS5
+	gfx_v10_0_patch_ucode(adev->gfx.ce_fw->data);
+#endif
 	amdgpu_gfx_cp_init_microcode(adev, AMDGPU_UCODE_ID_CP_CE);
 
 	if (!amdgpu_sriov_vf(adev)) {
@@ -4245,6 +4262,9 @@ static int gfx_v10_0_init_microcode(struct amdgpu_device *adev)
 		err = request_firmware(&adev->gfx.rlc_fw, fw_name, adev->dev);
 		if (err)
 			goto out;
+#ifdef CONFIG_X86_PS5
+		gfx_v10_0_patch_ucode(adev->gfx.rlc_fw->data);
+#endif
 
 		/* don't validate this firmware. There are apparently firmwares
 		 * in the wild with incorrect size in the header
@@ -4262,6 +4282,9 @@ static int gfx_v10_0_init_microcode(struct amdgpu_device *adev)
 				   "amdgpu/%s_mec%s.bin", ucode_prefix, wks);
 	if (err)
 		goto out;
+#ifdef CONFIG_X86_PS5
+	gfx_v10_0_patch_ucode(adev->gfx.mec_fw->data);
+#endif
 	amdgpu_gfx_cp_init_microcode(adev, AMDGPU_UCODE_ID_CP_MEC1);
 	amdgpu_gfx_cp_init_microcode(adev, AMDGPU_UCODE_ID_CP_MEC1_JT);
 
@@ -4269,6 +4292,9 @@ static int gfx_v10_0_init_microcode(struct amdgpu_device *adev)
 				   AMDGPU_UCODE_REQUIRED,
 				   "amdgpu/%s_mec2%s.bin", ucode_prefix, wks);
 	if (!err) {
+#ifdef CONFIG_X86_PS5
+		gfx_v10_0_patch_ucode(adev->gfx.mec2_fw->data);
+#endif
 		amdgpu_gfx_cp_init_microcode(adev, AMDGPU_UCODE_ID_CP_MEC2);
 		amdgpu_gfx_cp_init_microcode(adev, AMDGPU_UCODE_ID_CP_MEC2_JT);
 	} else {
@@ -10118,6 +10144,21 @@ static u32 gfx_v10_0_get_cu_active_bitmap_per_sh(struct amdgpu_device *adev)
 	return cu_active_bitmap;
 }
 
+/* PS5 harvested-CU unlock.
+ *   0 = disabled
+ *   1 = probe only (write then restore, log values)
+ *   2 = unlock SE0/SH0 only
+ *   3 = unlock all SE/SH (default)
+ *   4 = probe only, all SE/SH
+ * Override on the kernel command line, e.g.:
+ *   amdgpu.ps5_cu_unlock=0   (disable)
+ *   amdgpu.ps5_cu_unlock=1   (probe)
+ */
+static int ps5_cu_unlock = 0;
+module_param(ps5_cu_unlock, int, 0444);
+MODULE_PARM_DESC(ps5_cu_unlock,
+	"PS5 harvested-CU unlock (0=off (default), 1=probe, 2=SE0/SH0, 3=all, 4=probe-all)");
+
 static int gfx_v10_0_get_cu_info(struct amdgpu_device *adev,
 				 struct amdgpu_cu_info *cu_info)
 {
@@ -10131,6 +10172,43 @@ static int gfx_v10_0_get_cu_info(struct amdgpu_device *adev,
 	amdgpu_gfx_parse_disable_cu(adev, disable_masks, 4, 2);
 
 	mutex_lock(&adev->grbm_idx_mutex);
+	/* PS5: unlock harvested CUs. CC alone updates enumeration but SPI
+	 * still dispatches only to enabled WGPs; both writes are required
+	 * (verified empirically on BC-250). */
+	if (ps5_cu_unlock > 0) {
+		int ps5_se, ps5_sh;
+		for (ps5_se = 0; ps5_se < adev->gfx.config.max_shader_engines; ps5_se++) {
+			for (ps5_sh = 0; ps5_sh < adev->gfx.config.max_sh_per_se; ps5_sh++) {
+				u32 ps5_cc_orig, ps5_cc_after, ps5_spi_orig, ps5_spi_after;
+				if (ps5_cu_unlock == 2 && (ps5_se > 0 || ps5_sh > 0))
+					continue;
+				gfx_v10_0_select_se_sh(adev, ps5_se, ps5_sh, 0xffffffff, 0);
+				ps5_cc_orig = RREG32_SOC15(GC, 0, mmCC_GC_SHADER_ARRAY_CONFIG);
+				WREG32_SOC15(GC, 0, mmCC_GC_SHADER_ARRAY_CONFIG, 0);
+				ps5_cc_after = RREG32_SOC15(GC, 0, mmCC_GC_SHADER_ARRAY_CONFIG);
+				ps5_spi_orig = RREG32_SOC15(GC, 0, mmSPI_PG_ENABLE_STATIC_WGP_MASK);
+				WREG32_SOC15(GC, 0, mmSPI_PG_ENABLE_STATIC_WGP_MASK, 0x1f);
+				ps5_spi_after = RREG32_SOC15(GC, 0, mmSPI_PG_ENABLE_STATIC_WGP_MASK);
+				WREG32_SOC15(GC, 0, mmRLC_PG_ALWAYS_ON_WGP_MASK, 0x1f);
+				if (ps5_cu_unlock == 1 || ps5_cu_unlock == 4) {
+					WREG32_SOC15(GC, 0, mmCC_GC_SHADER_ARRAY_CONFIG, ps5_cc_orig);
+					WREG32_SOC15(GC, 0, mmSPI_PG_ENABLE_STATIC_WGP_MASK, ps5_spi_orig);
+					dev_info(adev->dev,
+						"ps5-40cu-probe: se=%d sh=%d CC=0x%08x->0x%08x SPI=0x%08x->0x%08x (restored)",
+						ps5_se, ps5_sh,
+						ps5_cc_orig, ps5_cc_after,
+						ps5_spi_orig, ps5_spi_after);
+				} else {
+					dev_info(adev->dev,
+						"ps5-40cu-enable: mode=%d se=%d sh=%d CC=0x%08x->0x%08x SPI=0x%08x->0x%08x",
+						ps5_cu_unlock, ps5_se, ps5_sh,
+						ps5_cc_orig, ps5_cc_after,
+						ps5_spi_orig, ps5_spi_after);
+				}
+			}
+		}
+		gfx_v10_0_select_se_sh(adev, 0xffffffff, 0xffffffff, 0xffffffff, 0);
+	}
 	for (i = 0; i < adev->gfx.config.max_shader_engines; i++) {
 		for (j = 0; j < adev->gfx.config.max_sh_per_se; j++) {
 			bitmap = i * adev->gfx.config.max_sh_per_se + j;

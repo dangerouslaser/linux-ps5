@@ -228,8 +228,16 @@ static int __init dmi_id_init(void)
 {
 	int ret;
 
+#ifdef CONFIG_X86_PS5
+	dmi_set_system_info(DMI_SYS_VENDOR, "Sony Interactive Entertainment");
+	dmi_set_system_info(DMI_PRODUCT_NAME, "PlayStation 5");
+	/* Filled by spcie.c */
+	dmi_set_system_info(DMI_PRODUCT_VERSION, "Unknown");
+	dmi_set_system_info(DMI_PRODUCT_SERIAL, "Unknown");
+#else
 	if (!dmi_available)
 		return -ENODEV;
+#endif
 
 	dmi_id_init_attr_table();
 

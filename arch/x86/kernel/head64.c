@@ -303,6 +303,11 @@ void __init __noreturn x86_64_start_reservations(char *real_mode_data)
 	case X86_SUBARCH_INTEL_MID:
 		x86_intel_mid_early_setup();
 		break;
+#ifdef CONFIG_X86_PS5
+	case X86_SUBARCH_PS5:
+		x86_ps5_early_setup();
+		break;
+#endif
 	default:
 		break;
 	}

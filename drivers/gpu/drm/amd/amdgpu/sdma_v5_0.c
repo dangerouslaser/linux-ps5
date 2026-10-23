@@ -1368,6 +1368,12 @@ static int sdma_v5_0_early_init(struct amdgpu_ip_block *ip_block)
 	struct amdgpu_device *adev = ip_block->adev;
 	int r;
 
+#ifdef CONFIG_X86_PS5
+	/* Reset SDMA to prevent ring test failures after reload. */
+	sdma_v5_0_soft_reset_engine(adev, 0);
+	sdma_v5_0_soft_reset_engine(adev, 1);
+#endif
+
 	r = sdma_v5_0_init_microcode(adev);
 	if (r)
 		return r;

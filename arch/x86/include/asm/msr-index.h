@@ -26,6 +26,7 @@
 #define _EFER_LMSLE		13 /* Long Mode Segment Limit Enable */
 #define _EFER_FFXSR		14 /* Enable Fast FXSAVE/FXRSTOR */
 #define _EFER_TCE		15 /* Enable Translation Cache Extensions */
+#define _EFER_NDA		16 /* No data access enable */
 #define _EFER_AUTOIBRS		21 /* Enable Automatic IBRS */
 
 #define EFER_SCE		(1<<_EFER_SCE)
@@ -36,6 +37,7 @@
 #define EFER_LMSLE		(1<<_EFER_LMSLE)
 #define EFER_FFXSR		(1<<_EFER_FFXSR)
 #define EFER_TCE		(1<<_EFER_TCE)
+#define EFER_NDA		(1<<_EFER_NDA)
 #define EFER_AUTOIBRS		(1<<_EFER_AUTOIBRS)
 
 /*

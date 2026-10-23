@@ -40,6 +40,10 @@
 #include "dc_dmub_srv.h"
 #include "dc.h"
 
+#ifdef CONFIG_X86_PS5
+#include <linux/ps5.h>
+#endif
+
 #define DC_LOGGER \
 	bp->base.ctx->logger
 
@@ -222,6 +226,17 @@ static enum bp_result transmitter_control_fallback(
 	struct bios_parser *bp,
 	struct bp_transmitter_control *cntl);
 
+#ifdef CONFIG_X86_PS5
+
+static enum bp_result svm_transmitter_control_v1_6(
+	struct bios_parser *bp,
+	struct bp_transmitter_control *cntl)
+{
+	return svm_execute_guest((void *)transmitter_control_v1_6, (u64)bp, (u64)cntl, 0, 0);
+}
+
+#endif
+
 static void init_transmitter_control(struct bios_parser *bp)
 {
 	uint8_t frev;
@@ -232,7 +247,11 @@ static void init_transmitter_control(struct bios_parser *bp)
 
 	switch (crev) {
 	case 6:
+#ifdef CONFIG_X86_PS5
+		bp->cmd_tbl.transmitter_control = svm_transmitter_control_v1_6;
+#else
 		bp->cmd_tbl.transmitter_control = transmitter_control_v1_6;
+#endif
 		break;
 	case 7:
 		bp->cmd_tbl.transmitter_control = transmitter_control_v1_7;

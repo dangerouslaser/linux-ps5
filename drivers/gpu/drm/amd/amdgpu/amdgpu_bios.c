@@ -222,8 +222,14 @@ static bool amdgpu_read_bios_from_rom(struct amdgpu_device *adev)
 
 static bool amdgpu_read_platform_bios(struct amdgpu_device *adev)
 {
+#ifdef CONFIG_X86_PS5
+	/* Hardcode vbios rom address. */
+	phys_addr_t rom = 0xc0000;
+	size_t romlen = 0x10000;
+#else
 	phys_addr_t rom = adev->pdev->rom;
 	size_t romlen = adev->pdev->romlen;
+#endif
 	void __iomem *bios;
 
 	adev->bios = NULL;
@@ -483,6 +489,7 @@ static inline bool amdgpu_acpi_vfct_bios(struct amdgpu_device *adev)
 
 static bool amdgpu_get_bios_apu(struct amdgpu_device *adev)
 {
+#ifndef CONFIG_X86_PS5
 	if (amdgpu_acpi_vfct_bios(adev)) {
 		dev_info(adev->dev, "Fetched VBIOS from VFCT\n");
 		goto success;
@@ -497,6 +504,7 @@ static bool amdgpu_get_bios_apu(struct amdgpu_device *adev)
 		dev_info(adev->dev, "Fetched VBIOS from ROM BAR\n");
 		goto success;
 	}
+#endif
 
 	if (amdgpu_read_platform_bios(adev)) {
 		dev_info(adev->dev, "Fetched VBIOS from platform\n");

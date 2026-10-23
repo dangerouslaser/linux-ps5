@@ -209,6 +209,7 @@ enum dce_version resource_parse_asic_id(struct hw_asic_id asic_id)
 		    asic_id.chip_id == DEVICE_ID_NV_13FA ||
 		    asic_id.chip_id == DEVICE_ID_NV_13FB ||
 		    asic_id.chip_id == DEVICE_ID_NV_13FC ||
+		    asic_id.chip_id == DEVICE_ID_NV_13DA ||
 		    asic_id.chip_id == DEVICE_ID_NV_13DB) {
 			dc_version = DCN_VERSION_2_01;
 			break;

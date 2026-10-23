@@ -6922,6 +6922,9 @@ static void kvm_setup_efer_caps(void)
 	if (kvm_cpu_cap_has(X86_FEATURE_NX))
 		kvm_caps.supported_efer_bits |= EFER_NX;
 
+	if (IS_ENABLED(CONFIG_X86_PS5))
+		kvm_caps.supported_efer_bits |= EFER_NDA;
+
 	if (kvm_cpu_cap_has(X86_FEATURE_FXSR_OPT))
 		kvm_caps.supported_efer_bits |= EFER_FFXSR;
 

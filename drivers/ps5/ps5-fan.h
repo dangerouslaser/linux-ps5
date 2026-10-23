@@ -1,0 +1,53 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+#ifndef _PS5_FAN_H
+#define _PS5_FAN_H
+
+#include <linux/ps5.h>
+
+#define PS5_FAN_MT_MODE_SET	0x02
+#define PS5_FAN_MT_MODE_GET	0x03
+#define PS5_FAN_MT_CURSET_SET	0x06
+#define PS5_FAN_MT_CURSET_GET	0x07
+
+#define PS5_FAN_CURSET_SET_LEN	0x40
+#define PS5_FAN_CURSET_GET_LEN	ICC_MSG_MIN_SIZE
+
+enum ps5_fan_zone {
+	PS5_ZONE_MAINSOC = 0,
+	PS5_ZONE_LOCAL1  = 1,
+	PS5_ZONE_LOCAL2  = 2,
+	PS5_ZONE_LOCAL3  = 3,
+	PS5_ZONE_COUNT   = 4,
+};
+
+enum ps5_fan_mode {
+	PS5_FAN_MODE_AUTO    = 1,
+	PS5_FAN_MODE_MAXIMUM = 2,
+	PS5_FAN_MODE_MINIMUM = 3,
+	PS5_FAN_MODE_MANUAL  = 4,
+	PS5_FAN_MODE_SP1     = 5,
+};
+#define PS5_FAN_MODE_MIN	PS5_FAN_MODE_AUTO
+#define PS5_FAN_MODE_MAX	PS5_FAN_MODE_SP1
+
+enum ps5_curset_id {
+	PS5_CURSET_TARGETTEMP = 0,
+	PS5_CURSET_PGAIN      = 1,
+	PS5_CURSET_IGAIN      = 2,
+	PS5_CURSET_ILIMIT     = 3,
+	PS5_CURSET_ULIMIT     = 4,
+	PS5_CURSET_DLIMIT     = 5,
+	PS5_CURSET_COUNT      = 6,
+};
+
+#define PS5_FAN_ZONE_OFF	0
+#define PS5_FAN_MODE_OFF	1
+#define PS5_FAN_SETTING_OFF	1
+#define PS5_FAN_CONFIG_OFF	1
+#define PS5_FAN_CURSET_OFF	0x04
+#define PS5_FAN_CURSET_GET_OFF	PS5_FAN_CURSET_OFF
+#define PS5_FAN_CURSET_SET_OFF	PS5_FAN_CURSET_OFF
+
+#define PS5_TARGETTEMP_SHIFT	8
+
+#endif /* _PS5_FAN_H */

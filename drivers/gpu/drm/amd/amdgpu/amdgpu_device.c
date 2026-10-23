@@ -1855,6 +1855,26 @@ static int amdgpu_device_parse_gpu_info_fw(struct amdgpu_device *adev)
 	case CHIP_CYAN_SKILLFISH:
 		if (adev->discovery.bin)
 			return 0;
+#ifdef CONFIG_X86_PS5
+		/* Hardcode gfxinfo. */
+		adev->gfx.config.max_shader_engines = 2;
+		adev->gfx.config.max_cu_per_sh = 10;
+		adev->gfx.config.max_sh_per_se = 2;
+		adev->gfx.config.max_backends_per_se = 8;
+		adev->gfx.config.max_texture_channel_caches = 16;
+		adev->gfx.config.max_gprs = 1024;
+		adev->gfx.config.max_gs_threads = 32;
+		adev->gfx.config.gs_vgt_table_depth = 32;
+		adev->gfx.config.gs_prim_buffer_depth = 1792;
+		adev->gfx.config.double_offchip_lds_buf = 1;
+		adev->gfx.cu_info.wave_front_size = 32;
+		adev->gfx.cu_info.max_waves_per_simd = 20;
+		adev->gfx.cu_info.max_scratch_slots_per_cu = 32;
+		adev->gfx.cu_info.lds_size = 64;
+		adev->gfx.config.num_sc_per_sh = 1;
+		adev->gfx.config.num_packer_per_sc = 2;
+		return 0;
+#endif
 		chip_name = "cyan_skillfish";
 		break;
 	}

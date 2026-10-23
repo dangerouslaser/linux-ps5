@@ -21,8 +21,9 @@
 #define _PAGE_BIT_SOFTW2	10	/* " */
 #define _PAGE_BIT_SOFTW3	11	/* " */
 #define _PAGE_BIT_PAT_LARGE	12	/* On 2MB or 1GB pages */
-#define _PAGE_BIT_SOFTW4	57	/* available for programmer */
-#define _PAGE_BIT_SOFTW5	58	/* available for programmer */
+#define _PAGE_BIT_SOFTW4	56	/* available for programmer */
+#define _PAGE_BIT_SOFTW5	57	/* available for programmer */
+#define _PAGE_BIT_NDA		58	/* No data access */
 #define _PAGE_BIT_PKEY_BIT0	59	/* Protection Keys, bit 1/4 */
 #define _PAGE_BIT_PKEY_BIT1	60	/* Protection Keys, bit 2/4 */
 #define _PAGE_BIT_PKEY_BIT2	61	/* Protection Keys, bit 3/4 */
@@ -65,6 +66,7 @@
 #define _PAGE_SPECIAL	(_AT(pteval_t, 1) << _PAGE_BIT_SPECIAL)
 #define _PAGE_CPA_TEST	(_AT(pteval_t, 1) << _PAGE_BIT_CPA_TEST)
 #define _PAGE_KERNEL_4K	(_AT(pteval_t, 1) << _PAGE_BIT_KERNEL_4K)
+#define _PAGE_NDA	(_AT(pteval_t, 1) << _PAGE_BIT_NDA)
 #ifdef CONFIG_X86_INTEL_MEMORY_PROTECTION_KEYS
 #define _PAGE_PKEY_BIT0	(_AT(pteval_t, 1) << _PAGE_BIT_PKEY_BIT0)
 #define _PAGE_PKEY_BIT1	(_AT(pteval_t, 1) << _PAGE_BIT_PKEY_BIT1)
@@ -192,6 +194,7 @@ enum page_cache_mode {
 #define ___D _PAGE_DIRTY
 #define ___G _PAGE_GLOBAL
 #define __NX _PAGE_NX
+#define _NDA _PAGE_NDA
 
 #define _ENC _PAGE_ENC
 #define __WP _PAGE_CACHE_WP
@@ -210,6 +213,7 @@ enum page_cache_mode {
 #define PAGE_COPY	     __pg(__PP|   0|_USR|___A|__NX|   0|   0|   0)
 #define PAGE_READONLY	     __pg(__PP|   0|_USR|___A|__NX|   0|   0|   0)
 #define PAGE_READONLY_EXEC   __pg(__PP|   0|_USR|___A|   0|   0|   0|   0)
+#define PAGE_EXECONLY	     __pg(__PP|   0|_USR|___A|_NDA|   0|   0|   0)
 
 /*
  * Page tables needs to have Write=1 in order for any lower PTEs to be

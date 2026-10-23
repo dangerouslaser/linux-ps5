@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config MTS
+	tristate "MediaTek Star Gigabit Ethernet"
+	depends on PCI && X86_PS5
+	help
+	  Driver for the MediaTek Star based Gigabit Ethernet controller
+	  (104d:9104) found on the PlayStation 5.
+
+	  To compile this driver as a module, choose M here. The module
+	  will be called mts.

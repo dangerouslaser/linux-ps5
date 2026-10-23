@@ -10,7 +10,11 @@ static pgprot_t protection_map[16] __ro_after_init = {
 	[VM_READ]					= PAGE_READONLY,
 	[VM_WRITE]					= PAGE_COPY,
 	[VM_WRITE | VM_READ]				= PAGE_COPY,
+#ifdef CONFIG_X86_PS5
+	[VM_EXEC]					= PAGE_EXECONLY,
+#else
 	[VM_EXEC]					= PAGE_READONLY_EXEC,
+#endif
 	[VM_EXEC | VM_READ]				= PAGE_READONLY_EXEC,
 	[VM_EXEC | VM_WRITE]				= PAGE_COPY_EXEC,
 	[VM_EXEC | VM_WRITE | VM_READ]			= PAGE_COPY_EXEC,
@@ -18,7 +22,11 @@ static pgprot_t protection_map[16] __ro_after_init = {
 	[VM_SHARED | VM_READ]				= PAGE_READONLY,
 	[VM_SHARED | VM_WRITE]				= PAGE_SHARED,
 	[VM_SHARED | VM_WRITE | VM_READ]		= PAGE_SHARED,
+#ifdef CONFIG_X86_PS5
+	[VM_SHARED | VM_EXEC]				= PAGE_EXECONLY,
+#else
 	[VM_SHARED | VM_EXEC]				= PAGE_READONLY_EXEC,
+#endif
 	[VM_SHARED | VM_EXEC | VM_READ]			= PAGE_READONLY_EXEC,
 	[VM_SHARED | VM_EXEC | VM_WRITE]		= PAGE_SHARED_EXEC,
 	[VM_SHARED | VM_EXEC | VM_WRITE | VM_READ]	= PAGE_SHARED_EXEC

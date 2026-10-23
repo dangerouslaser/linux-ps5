@@ -75,6 +75,9 @@ MODULE_FIRMWARE(FIRMWARE_RENOIR);
 MODULE_FIRMWARE(FIRMWARE_GREEN_SARDINE);
 MODULE_FIRMWARE(FIRMWARE_ALDEBARAN);
 MODULE_FIRMWARE(FIRMWARE_NAVI10);
+#ifdef CONFIG_X86_PS5
+MODULE_FIRMWARE("amdgpu/ps5_vcn.bin");
+#endif
 MODULE_FIRMWARE(FIRMWARE_NAVI14);
 MODULE_FIRMWARE(FIRMWARE_NAVI12);
 MODULE_FIRMWARE(FIRMWARE_SIENNA_CICHLID);
@@ -107,6 +110,8 @@ int amdgpu_vcn_early_init(struct amdgpu_device *adev, int i)
 	adev->vcn.inst[i].adev = adev;
 	adev->vcn.inst[i].inst = i;
 	amdgpu_ucode_ip_version_decode(adev, UVD_HWIP, ucode_prefix, sizeof(ucode_prefix));
+	if (IS_ENABLED(CONFIG_X86_PS5))
+		strscpy(ucode_prefix, "ps5_vcn", sizeof(ucode_prefix));
 
 	if (i != 0 && adev->vcn.per_inst_fw) {
 		r = amdgpu_ucode_request(adev, &adev->vcn.inst[i].fw,

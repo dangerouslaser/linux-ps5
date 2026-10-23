@@ -5,6 +5,11 @@
 #include <linux/hdmi.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/debugfs.h>
+#include <linux/moduleparam.h>
+#include <linux/seq_file.h>
+#include <linux/string.h>
+#include <linux/uaccess.h>
 #include <linux/ps5.h>
 #include <drm/drm_edid.h>
 
@@ -110,6 +115,39 @@ static u8 tmds_ch_swap;
 static u8 dp_polarity;
 static u8 dp_ch_swap;
 static bool scrambling;
+
+static char *extra_vics = "";
+module_param(extra_vics, charp, 0644);
+MODULE_PARM_DESC(extra_vics, "Experimental: extra CTA VICs to allow, comma separated");
+
+static int content_type = -1;
+module_param(content_type, int, 0644);
+MODULE_PARM_DESC(content_type, "AVI content type: -1 game (default), 0 none, 1 graphics, 2 photo, 3 cinema, 4 game");
+
+static bool is_extra_vic(u8 vic)
+{
+	char buf[128], *p, *tok;
+	unsigned int v;
+
+	if (!vic || !extra_vics || !*extra_vics)
+		return false;
+
+	strscpy(buf, extra_vics, sizeof(buf));
+	p = buf;
+	while ((tok = strsep(&p, ",")))
+		if (!kstrtouint(strim(tok), 10, &v) && v == vic)
+			return true;
+
+	return false;
+}
+
+/* Modes above the HDMI 1.4 TMDS limit need scrambling (2160p60 recipe). */
+static bool flava3_high_tmds(const struct drm_display_mode *mode)
+{
+	u8 vic = drm_match_cea_mode(mode);
+
+	return vic == 97 || (is_extra_vic(vic) && mode->clock > 340000);
+}
 static bool hdr_enabled;
 static bool bt2020_enabled;
 
@@ -783,7 +821,8 @@ static void setHdmiBasicVideoConfigFlava3(const struct drm_display_mode *mode,
 	i2c_write(0x7009, 0x00);
 	i2c_write(0x7040, 0x42);
 	i2c_write(0x7225, 0x28);
-	if (vic == 16 || vic == 63) {
+	if (vic == 16 || vic == 63 ||
+	    (is_extra_vic(vic) && !flava3_high_tmds(mode))) {
 		/* Set VIC and content type */
 		i2c_write_data(0x7227, (u8[]){vic, 0x00}, 2);
 		i2c_write_data(0x7070, (u8[]){vic, vic, 0x00, 0x00, 0x00, 0x00}, 6);
@@ -791,7 +830,7 @@ static void setHdmiBasicVideoConfigFlava3(const struct drm_display_mode *mode,
 		/* Set VIC and content type */
 		i2c_write_data(0x7227, (u8[]){0x04, 0x00}, 2);
 		i2c_write_data(0x7070, (u8[]){0x00, 0x00, 0x00, 0x00, 0x00, 0xfb}, 6);
-	} else if (vic == 97) {
+	} else if (flava3_high_tmds(mode)) {
 		/* Set VIC and content type */
 		i2c_write_data(0x7227, (u8[]){0x06, 0x00}, 2);
 		i2c_write_data(0x7070, (u8[]){0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 6);
@@ -817,7 +856,7 @@ static void setHdmiBasicVideoConfigFlava3(const struct drm_display_mode *mode,
 	}
 	i2c_write(0x10e7, 0xff);
 	i2c_write(0x7202, 0x20);
-	if (vic == 97) {
+	if (flava3_high_tmds(mode)) {
 		i2c_write(0x7072, 0x01);
 		i2c_write(0x7074, 0x07);
 		i2c_write(0x7206, 0x80);
@@ -835,22 +874,28 @@ static void setHdmiBasicVideoConfigFlava3(const struct drm_display_mode *mode,
 static void setVideoAdditionalConfigFlava3(const struct drm_display_mode *mode)
 {
 	u8 vic = drm_match_cea_mode(mode);
+	bool high_tmds = flava3_high_tmds(mode);
 
 	i2c_init(1);
 	i2c_waitset(0x10e7, 0x80);
-	if (vic == 97) {
+	if (high_tmds) {
 		/* Set VIC */
 		i2c_mask(0x7227, vic, 0xff);
 	}
-	/* Enable IT content */
-	i2c_mask(0x7226, 1 << 7, 0x80);
-	/* Set content type (game) */
-	i2c_mask(0x7228, 3 << 4, 0x30);
+	/* AVI PB3 ITC and PB5 CN: IT content, game by default */
+	if (content_type == 0) {
+		i2c_mask(0x7226, 0, 0x80);
+		i2c_mask(0x7228, 0, 0x30);
+	} else {
+		i2c_mask(0x7226, 1 << 7, 0x80);
+		i2c_mask(0x7228, ((content_type > 0 && content_type <= 4 ?
+				   content_type : 4) - 1) << 4, 0x30);
+	}
 	i2c_write(0x7204, 0x40);
 	i2c_waitclear(0x7204, 0x40);
 	i2c_delay(10);
 	i2c_begin_block();
-	if (vic == 97) {
+	if (high_tmds) {
 		i2c_write(0x7019, 0x01);
 	} else {
 		i2c_write(0x7019, 0x00);
@@ -866,15 +911,15 @@ static void setVideoAdditionalConfigFlava3(const struct drm_display_mode *mode)
 	i2c_waitclear(0x7a84, 0x01);
 	i2c_begin_block();
 	i2c_write(0x7a8b, 0x05);
-	if (vic == 97 || scrambling) {
-		i2c_write(0x7c00, vic == 97 ? 0x03 : 0x00);
+	if (high_tmds || scrambling) {
+		i2c_write(0x7c00, high_tmds ? 0x03 : 0x00);
 		i2c_write_data(0x7a80, (u8[]){0xa8, 0x20, 0x00, 0x80}, 4);
 	}
 	i2c_end_block();
-	if (vic == 97 || scrambling) {
+	if (high_tmds || scrambling) {
 		i2c_waitclear(0x7a84, 0x01);
 	}
-	scrambling = vic == 97;
+	scrambling = high_tmds;
 	i2c_begin_block();
 	i2c_write(0x7021, 0xff);
 	i2c_write(0x700a, 0x02);
@@ -1266,6 +1311,9 @@ bool isHdmiModeValid(const struct drm_display_mode *mode, int force_1080p)
 	if (force_1080p)
 		return vic == 16; /* 1080p60 */
 
+	if (is_extra_vic(vic))
+		return true;
+
 	/* 1440p */
 	if (mode->hdisplay == 2560 && mode->vdisplay == 1440) {
 		return mode->clock == 241500 || mode->clock == 241700;
@@ -1330,3 +1378,102 @@ void hdmi_notification_handler(struct icc_msg *msg)
 		}
 }
 EXPORT_SYMBOL(hdmi_notification_handler);
+
+/* Experiment interface: raw ICC messages from debugfs. */
+static DEFINE_MUTEX(dbg_lock);
+static u8 dbg_query[ICC_MSG_MAX_SIZE];
+static u8 dbg_reply[ICC_MSG_MAX_SIZE];
+static int dbg_ret = -ENODATA;
+
+static ssize_t dbg_icc_write(struct file *file, const char __user *ubuf,
+			     size_t len, loff_t *ppos)
+{
+	struct icc_msg *msg = (struct icc_msg *)dbg_query;
+	char *text, *p, *tok;
+	unsigned int service, type, val;
+	size_t n = 0, total;
+	int ret = 0;
+
+	if (len > 8192)
+		return -E2BIG;
+	text = memdup_user_nul(ubuf, len);
+	if (IS_ERR(text))
+		return PTR_ERR(text);
+
+	mutex_lock(&dbg_lock);
+	memset(dbg_query, 0, sizeof(dbg_query));
+	memset(dbg_reply, 0, sizeof(dbg_reply));
+
+	p = text;
+	tok = strsep(&p, " \t\n");
+	if (!tok || kstrtouint(tok, 16, &service) || service > 0xff) {
+		ret = -EINVAL;
+		goto out;
+	}
+	do {
+		tok = strsep(&p, " \t\n");
+	} while (tok && !*tok);
+	if (!tok || kstrtouint(tok, 16, &type) || type > 0xffff) {
+		ret = -EINVAL;
+		goto out;
+	}
+	while ((tok = strsep(&p, " \t\n"))) {
+		if (!*tok)
+			continue;
+		if (kstrtouint(tok, 16, &val) || val > 0xff ||
+		    sizeof(*msg) + n >= ICC_MSG_MAX_SIZE) {
+			ret = -EINVAL;
+			goto out;
+		}
+		msg->data[n++] = val;
+	}
+
+	total = sizeof(*msg) + n;
+	msg->service_id = service;
+	msg->msg_type = type;
+	msg->length = max_t(size_t, total, ICC_MSG_MIN_SIZE);
+
+	dbg_ret = icc_query(dbg_query, dbg_reply);
+out:
+	mutex_unlock(&dbg_lock);
+	kfree(text);
+	return ret ? ret : len;
+}
+
+static int dbg_icc_show(struct seq_file *m, void *unused)
+{
+	struct icc_msg *msg = (struct icc_msg *)dbg_reply;
+	size_t len, i;
+
+	mutex_lock(&dbg_lock);
+	len = min_t(size_t, msg->length, ICC_MSG_MAX_SIZE);
+	seq_printf(m, "ret=%d service=%02x type=%04x length=%zu\n",
+		   dbg_ret, msg->service_id, msg->msg_type, len);
+	for (i = 0; i < len; i++)
+		seq_printf(m, "%02x%c", dbg_reply[i], (i % 16 == 15 || i + 1 == len) ? '\n' : ' ');
+	mutex_unlock(&dbg_lock);
+	return 0;
+}
+
+static int dbg_icc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, dbg_icc_show, NULL);
+}
+
+static const struct file_operations dbg_icc_fops = {
+	.owner = THIS_MODULE,
+	.open = dbg_icc_open,
+	.read = seq_read,
+	.write = dbg_icc_write,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static int __init ps5_hdmi_debugfs_init(void)
+{
+	struct dentry *dir = debugfs_create_dir("ps5_hdmi", NULL);
+
+	debugfs_create_file("icc", 0600, dir, NULL, &dbg_icc_fops);
+	return 0;
+}
+late_initcall(ps5_hdmi_debugfs_init);

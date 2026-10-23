@@ -1454,6 +1454,34 @@ STATIC_IFN_KUNIT void handle_hpd_irq(void *param)
 }
 EXPORT_IF_KUNIT(handle_hpd_irq);
 
+#ifdef CONFIG_X86_PS5
+void amdgpu_dm_ps5_hotplug_work_func(struct work_struct *work)
+{
+	struct amdgpu_display_manager *dm =
+		container_of(work, struct amdgpu_display_manager, ps5_hotplug_work);
+	struct drm_device *dev = adev_to_drm(dm->adev);
+	struct drm_connector_list_iter iter;
+	struct drm_connector *connector;
+
+	dm->ps5_hdmi_resetup_until = jiffies + msecs_to_jiffies(PS5_HDMI_RESETUP_WINDOW_MS);
+
+	drm_connector_list_iter_begin(dev, &iter);
+	drm_for_each_connector_iter(connector, &iter) {
+		if (connector->connector_type == DRM_MODE_CONNECTOR_DisplayPort)
+			handle_hpd_irq_helper(to_amdgpu_dm_connector(connector),
+					      DETECT_REASON_HPD);
+	}
+	drm_connector_list_iter_end(&iter);
+}
+
+void amdgpu_dm_ps5_hotplug_handler(void *data)
+{
+	struct amdgpu_display_manager *dm = data;
+
+	queue_work(system_percpu_wq, &dm->ps5_hotplug_work);
+}
+#endif
+
 STATIC_IFN_KUNIT void schedule_hpd_rx_offload_work(struct amdgpu_device *adev, struct hpd_rx_irq_offload_work_queue *offload_wq,
 							union hpd_irq_data hpd_irq_data)
 {

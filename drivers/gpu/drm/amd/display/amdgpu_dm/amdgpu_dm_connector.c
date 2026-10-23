@@ -78,6 +78,10 @@
 
 #include "amdgpu_dm_trace.h"
 
+#ifdef CONFIG_X86_PS5
+#include <linux/ps5.h>
+#endif
+
 /* Encoder functions */
 
 static void amdgpu_dm_encoder_destroy(struct drm_encoder *encoder)
@@ -871,6 +875,43 @@ STATIC_IFN_KUNIT bool adjust_colour_depth_from_display_info(
 }
 EXPORT_IF_KUNIT(adjust_colour_depth_from_display_info);
 
+#ifdef CONFIG_X86_PS5
+/*
+ * The PS5's HDMI converter can only output HDR at 4K60 as 12 bpc YCbCr 4:2:2,
+ * which uses the same TMDS clock as 8 bpc RGB. Switch to it when userspace
+ * left the colour format on auto; an explicit colour format request is
+ * honoured as is.
+ */
+static void dm_ps5_set_hdr_timing(struct dc_crtc_timing *timing,
+				  const struct drm_display_mode *mode,
+				  const struct drm_connector_state *state)
+{
+	const struct drm_display_info *info;
+	struct hdmi_drm_infoframe frame;
+	u8 vic = drm_match_cea_mode(mode);
+
+	if (!state || state->color_format != DRM_CONNECTOR_COLOR_FORMAT_AUTO)
+		return;
+	info = &state->connector->display_info;
+	if (!isHdmiHdrSupported() || !state->hdr_output_metadata ||
+	    !(info->color_formats & BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422)) ||
+	    timing->pixel_encoding != PIXEL_ENCODING_RGB ||
+	    timing->display_color_depth < COLOR_DEPTH_121212)
+		return;
+	if (state->colorspace != DRM_MODE_COLORIMETRY_BT2020_RGB &&
+	    state->colorspace != DRM_MODE_COLORIMETRY_BT2020_YCC)
+		return;
+	if (vic != 16 && vic != 97) /* 1080p60, 2160p60 */
+		return;
+	if (drm_hdmi_infoframe_set_hdr_metadata(&frame, state) ||
+	    frame.eotf != HDMI_EOTF_SMPTE_ST2084)
+		return;
+
+	timing->pixel_encoding = PIXEL_ENCODING_YCBCR422;
+	timing->display_color_depth = COLOR_DEPTH_121212;
+}
+#endif
+
 STATIC_IFN_KUNIT void fill_stream_properties_from_drm_display_mode(
 	struct dc_stream_state *stream,
 	const struct drm_display_mode *mode_in,
@@ -980,6 +1021,10 @@ STATIC_IFN_KUNIT void fill_stream_properties_from_drm_display_mode(
 	 */
 	if (is_hdmi_ep)
 		adjust_colour_depth_from_display_info(timing_out, info);
+
+#ifdef CONFIG_X86_PS5
+	dm_ps5_set_hdr_timing(timing_out, mode_in, connector_state);
+#endif
 
 	stream->output_color_space = amdgpu_dm_get_output_color_space(timing_out, connector_state);
 	stream->content_type = get_output_content_type(connector_state);
@@ -2497,6 +2542,11 @@ enum drm_mode_status amdgpu_dm_connector_mode_valid(struct drm_connector *connec
 	 */
 	struct amdgpu_dm_connector *aconnector = to_amdgpu_dm_connector(connector);
 
+#ifdef CONFIG_X86_PS5
+	if (!isHdmiModeValid(mode, amdgpu_force_1080p))
+		return MODE_ERROR;
+#endif
+
 	if ((mode->flags & DRM_MODE_FLAG_INTERLACE) ||
 			(mode->flags & DRM_MODE_FLAG_DBLSCAN))
 		return result;
@@ -3617,6 +3667,37 @@ void dm_restore_drm_connector_state(struct drm_device *dev,
 	if (acrtc_state->stream->sink != aconnector->dc_sink)
 		dm_force_atomic_commit(&aconnector->base);
 }
+
+#ifdef CONFIG_X86_PS5
+void amdgpu_dm_ps5_hdmi_resetup_work_func(struct work_struct *work)
+{
+	struct amdgpu_display_manager *dm =
+		container_of(to_delayed_work(work), struct amdgpu_display_manager,
+			     ps5_hdmi_resetup_work);
+	struct drm_device *dev = adev_to_drm(dm->adev);
+	struct drm_connector_list_iter iter;
+	struct drm_connector *connector;
+	struct amdgpu_crtc *acrtc;
+
+	drm_modeset_lock_all(dev);
+	dm->ps5_hdmi_resetup = true;
+
+	drm_connector_list_iter_begin(dev, &iter);
+	drm_for_each_connector_iter(connector, &iter) {
+		if (connector->connector_type == DRM_MODE_CONNECTOR_WRITEBACK ||
+		    !connector->state || !connector->encoder)
+			continue;
+
+		acrtc = to_amdgpu_crtc(connector->encoder->crtc);
+		if (acrtc && to_dm_crtc_state(acrtc->base.state)->stream)
+			dm_force_atomic_commit(connector);
+	}
+	drm_connector_list_iter_end(&iter);
+
+	dm->ps5_hdmi_resetup = false;
+	drm_modeset_unlock_all(dev);
+}
+#endif
 
 static bool dm_edid_parser_send_cea(struct amdgpu_display_manager *dm,
 		unsigned int offset,

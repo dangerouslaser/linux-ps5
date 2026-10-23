@@ -90,6 +90,10 @@
 #include <drm/drm_privacy_screen_consumer.h>
 #include <drm/display/drm_dp_mst_helper.h>
 #include <drm/display/drm_hdmi_helper.h>
+
+#ifdef CONFIG_X86_PS5
+#include <linux/ps5.h>
+#endif
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_uapi.h>
 #include <drm/drm_atomic_helper.h>
@@ -674,6 +678,11 @@ static int amdgpu_dm_init(struct amdgpu_device *adev)
 
 	if (amdgpu_dc_debug_mask & DC_SKIP_DETECTION_LT)
 		adev->dm.dc->debug.skip_detection_link_training = true;
+
+#ifdef CONFIG_X86_PS5
+	/* Link training only works during modeset. */
+	adev->dm.dc->debug.skip_detection_link_training = true;
+#endif
 
 	adev->dm.dc->debug.visual_confirm = amdgpu_dc_visual_confirm;
 
@@ -1371,7 +1380,16 @@ static int dm_hw_init(struct amdgpu_ip_block *ip_block)
 	r = amdgpu_dm_init(adev);
 	if (r)
 		goto err_release_i2c;
+#ifdef CONFIG_X86_PS5
+	/* HPD is not supported, use HDMI notifications instead. */
+	INIT_WORK(&adev->dm.ps5_hotplug_work, amdgpu_dm_ps5_hotplug_work_func);
+	INIT_DELAYED_WORK(&adev->dm.ps5_hdmi_resetup_work,
+			  amdgpu_dm_ps5_hdmi_resetup_work_func);
+	adev->dm.ps5_hdmi_resetup_until = jiffies;
+	hdmi_set_hotplug_handler(amdgpu_dm_ps5_hotplug_handler, &adev->dm);
+#else
 	amdgpu_dm_hpd_init(adev);
+#endif
 
 	r = dm_oem_i2c_hw_init(adev);
 	if (r)
@@ -1400,7 +1418,13 @@ static int dm_hw_fini(struct amdgpu_ip_block *ip_block)
 	if (adev->dm.i2c_devres_group)
 		devres_release_group(adev->dev, adev->dm.i2c_devres_group);
 
+#ifdef CONFIG_X86_PS5
+	hdmi_set_hotplug_handler(NULL, NULL);
+	cancel_work_sync(&adev->dm.ps5_hotplug_work);
+	cancel_delayed_work_sync(&adev->dm.ps5_hdmi_resetup_work);
+#else
 	amdgpu_dm_hpd_fini(adev);
+#endif
 
 	amdgpu_dm_fini(adev);
 	return 0;
@@ -5024,6 +5048,48 @@ STATIC_IFN_KUNIT void dm_enable_per_frame_crtc_master_sync(struct dc_state *cont
 }
 EXPORT_IF_KUNIT(dm_enable_per_frame_crtc_master_sync);
 
+#ifdef CONFIG_X86_PS5
+static void dm_ps5_set_hdr_config(const struct drm_connector_state *state)
+{
+	struct hdmi_drm_infoframe frame;
+	bool bt2020;
+
+	if (!state)
+		return;
+
+	bt2020 = state->colorspace == DRM_MODE_COLORIMETRY_BT2020_RGB ||
+		 state->colorspace == DRM_MODE_COLORIMETRY_BT2020_YCC;
+
+	if (state->hdr_output_metadata &&
+	    !drm_hdmi_infoframe_set_hdr_metadata(&frame, state))
+		sceHdmiSetHdrConfig(&frame, bt2020);
+	else
+		sceHdmiSetHdrConfig(NULL, bt2020);
+}
+
+static void dm_ps5_hdmi_enable(struct dc_stream_state *stream,
+			       const struct drm_display_mode *mode)
+{
+	int channels = 0, i;
+
+	for (i = 0; i < stream->audio_info.mode_count; i++) {
+		if (stream->audio_info.modes[i].channel_count > channels)
+			channels = stream->audio_info.modes[i].channel_count;
+	}
+
+	/* Fallback to stereo if EDID has no audio modes */
+	if (channels == 0)
+		channels = 2;
+
+	sceHdmiSetVideoConfig(mode,
+			      amdgpu_dm_convert_dc_color_depth_into_bpc(stream->timing.display_color_depth),
+			      stream->timing.pixel_encoding == PIXEL_ENCODING_YCBCR422);
+	sceHdmiDeviceSetVideoMute(0);
+	sceHdmiSetAudioConfig(channels);
+	sceHdmiSetAudioMute(0);
+}
+#endif
+
 /**
  * amdgpu_dm_atomic_commit_tail() - AMDgpu DM's commit tail implementation.
  * @state: The atomic state to commit
@@ -5054,11 +5120,64 @@ static void amdgpu_dm_atomic_commit_tail(struct drm_atomic_commit *state)
 	drm_atomic_helper_update_legacy_modeset_state(dev, state);
 	drm_dp_mst_atomic_wait_for_dependencies(state);
 
+#ifdef CONFIG_X86_PS5
+	for_each_oldnew_crtc_in_state(state, crtc, old_crtc_state,
+				      new_crtc_state, i) {
+		dm_new_crtc_state = to_dm_crtc_state(new_crtc_state);
+
+		if ((new_crtc_state->active &&
+		    (!old_crtc_state->active ||
+		     drm_atomic_crtc_needs_modeset(new_crtc_state))) ||
+		    (old_crtc_state->active &&
+		    (!new_crtc_state->active ||
+		     drm_atomic_crtc_needs_modeset(new_crtc_state)))) {
+			if (dm_new_crtc_state->stream &&
+			    dc_is_dp_signal(dm_new_crtc_state->stream->signal)) {
+				sceHdmiSetAudioMute(1);
+				sceHdmiDeviceSetVideoMute(1);
+				sceHdmiInitVideoConfig();
+			}
+		}
+	}
+#endif
+
 	dm_state = dm_atomic_get_new_state(state);
 	if (dm_state && dm_state->context) {
 		dc_state = dm_state->context;
 		amdgpu_dm_commit_streams(state, dc_state);
 	}
+
+#ifdef CONFIG_X86_PS5
+	for_each_oldnew_crtc_in_state(state, crtc, old_crtc_state,
+				      new_crtc_state, i) {
+		dm_new_crtc_state = to_dm_crtc_state(new_crtc_state);
+
+		if (new_crtc_state->active &&
+		    (!old_crtc_state->active ||
+		     drm_atomic_crtc_needs_modeset(new_crtc_state))) {
+			if (dm_new_crtc_state->stream &&
+			    dc_is_dp_signal(dm_new_crtc_state->stream->signal)) {
+				dm_ps5_hdmi_enable(dm_new_crtc_state->stream,
+						   &new_crtc_state->mode);
+
+				/* HDMI setup clears HDR, set it again. */
+				connector = amdgpu_dm_find_first_crtc_matching_connector(state, crtc);
+				if (connector) {
+					new_con_state = drm_atomic_get_new_connector_state(state,
+											   connector);
+					dm_ps5_set_hdr_config(new_con_state);
+				}
+
+				/* No audio after a hotplug until it's set up again. */
+				if (time_before(jiffies, dm->ps5_hdmi_resetup_until) &&
+				    !dm->ps5_hdmi_resetup)
+					mod_delayed_work(system_percpu_wq,
+							 &dm->ps5_hdmi_resetup_work,
+							 msecs_to_jiffies(PS5_HDMI_RESETUP_DELAY_MS));
+			}
+		}
+	}
+#endif
 
 	amdgpu_dm_update_hdcp(state);
 
@@ -5129,6 +5248,9 @@ static void amdgpu_dm_atomic_commit_tail(struct drm_atomic_commit *state)
 		if (hdr_changed) {
 			amdgpu_dm_fill_hdr_info_packet(new_con_state, &hdr_packet);
 			stream_update.hdr_static_metadata = &hdr_packet;
+#ifdef CONFIG_X86_PS5
+			dm_ps5_set_hdr_config(new_con_state);
+#endif
 		}
 
 		status = dc_stream_get_status(dm_new_crtc_state->stream);

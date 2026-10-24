@@ -150,6 +150,7 @@ static bool flava3_high_tmds(const struct drm_display_mode *mode)
 }
 static bool hdr_enabled;
 static bool bt2020_enabled;
+static bool dv_vsif_enabled;
 
 /* Serializes use of i2c_ctx, held from i2c_init() to i2c_exec(). */
 static DEFINE_MUTEX(i2c_lock);
@@ -937,6 +938,7 @@ static void setVideoAdditionalConfigFlava3(const struct drm_display_mode *mode)
 static void setHdmiVideoConfigFlava3(const struct drm_display_mode *mode,
 				     unsigned int bpc, bool yuv422)
 {
+	dv_vsif_enabled = false;
 	configParamFlava3Pre();
 	configLinkTrainingFlava3();
 	setHdmiBasicVideoConfigFlava3(mode, bpc, yuv422);
@@ -1256,6 +1258,41 @@ void sceHdmiSetHdrConfig(const struct hdmi_drm_infoframe *frame, bool bt2020)
 	}
 }
 EXPORT_SYMBOL(sceHdmiSetHdrConfig);
+
+static void setDolbyVsifFlava3(const u8 *frame, size_t len)
+{
+	if (!frame && !dv_vsif_enabled)
+		return;
+
+	i2c_init(1);
+	if (frame) {
+		/* Second vendor InfoFrame slot, normally the HDMI 1.4 VSIF */
+		i2c_write_data(0x72c0, (u8 *)frame, len);
+		i2c_mask(0x7203, 0x04, 0x04);
+	} else {
+		i2c_mask(0x7203, 0x00, 0x04);
+	}
+	i2c_write(0x7204, 0x04);
+	i2c_waitclear(0x7204, 0x04);
+	/* AVI PB3 Q: full range RGB for the tunnel, default otherwise */
+	i2c_mask(0x7226, frame ? 0x08 : 0x00, 0x0c);
+	i2c_write(0x7204, 0x40);
+	i2c_waitclear(0x7204, 0x40);
+	i2c_exec();
+	dv_vsif_enabled = frame != NULL;
+}
+
+/*
+ * Send a Dolby Vision VSIF (header and checksum included), or stop sending
+ * it with NULL. Video setup turns the slot off, so call this after it.
+ */
+void sceHdmiSetDolbyVsif(const u8 *frame, size_t len)
+{
+	if (hdmi_ic_type != HDMI_IC_TYPE_FLAVA3 || len > 32)
+		return;
+	setDolbyVsifFlava3(frame, len);
+}
+EXPORT_SYMBOL(sceHdmiSetDolbyVsif);
 
 void sceHdmiDeviceSetVideoMute(int mute)
 {

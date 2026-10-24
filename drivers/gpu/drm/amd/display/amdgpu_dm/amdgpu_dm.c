@@ -5068,6 +5068,26 @@ static void dm_ps5_set_hdr_config(const struct drm_connector_state *state)
 		sceHdmiSetHdrConfig(NULL, bt2020);
 }
 
+/* The converter sends the DV VSIF; DP has no vendor InfoFrame of its own. */
+static void dm_ps5_set_dv_config(const struct dc_stream_state *stream)
+{
+	const struct dc_info_packet *vsp = &stream->vsp_infopacket;
+	u8 frame[3 + sizeof(vsp->sb)];
+	size_t len;
+
+	if (!stream->dv_standard || !vsp->valid) {
+		sceHdmiSetDolbyVsif(NULL, 0);
+		return;
+	}
+	frame[0] = vsp->hb0;
+	frame[1] = vsp->hb1;
+	frame[2] = vsp->hb2;
+	/* sb holds the checksum and then the payload */
+	len = min_t(size_t, 4 + vsp->hb2, sizeof(frame));
+	memcpy(&frame[3], vsp->sb, len - 3);
+	sceHdmiSetDolbyVsif(frame, len);
+}
+
 static void dm_ps5_hdmi_enable(struct dc_stream_state *stream,
 			       const struct drm_display_mode *mode)
 {
@@ -5168,6 +5188,7 @@ static void amdgpu_dm_atomic_commit_tail(struct drm_atomic_commit *state)
 											   connector);
 					dm_ps5_set_hdr_config(new_con_state);
 				}
+				dm_ps5_set_dv_config(dm_new_crtc_state->stream);
 
 				/* No audio after a hotplug until it's set up again. */
 				if (time_before(jiffies, dm->ps5_hdmi_resetup_until) &&

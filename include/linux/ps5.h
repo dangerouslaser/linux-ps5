@@ -58,6 +58,7 @@ void hdmiSystemResume(void);
 void sceHdmiInitVideoConfig(void);
 void sceHdmiSetVideoConfig(const struct drm_display_mode *mode, unsigned int bpc, bool yuv422);
 void sceHdmiSetHdrConfig(const struct hdmi_drm_infoframe *frame, bool bt2020);
+void sceHdmiSetDolbyVsif(const u8 *frame, size_t len);
 void sceHdmiSetAudioConfig(int channels);
 void sceHdmiSetAudioStream(int channels, int rate, bool non_pcm);
 void sceHdmiDeviceSetVideoMute(int mute);

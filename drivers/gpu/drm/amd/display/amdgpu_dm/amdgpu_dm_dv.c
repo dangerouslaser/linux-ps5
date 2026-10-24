@@ -16,6 +16,10 @@
 #include "amdgpu_dm_dv.h"
 #include "dc.h"
 #include "dc_types.h"
+#include "dc_types.h"
+#ifdef CONFIG_X86_PS5
+#include <linux/ps5.h>
+#endif
 
 static bool dv_standard = true;
 module_param_named(dv_standard, dv_standard, bool, 0444);
@@ -39,15 +43,46 @@ static bool dv_dcn_supported(enum dce_version version)
 	}
 }
 
+/*
+ * The PS5's DP output feeds an HDMI converter that can send the DV VSIF
+ * (drivers/ps5/hdmi.c), so its DP connector stands in for native HDMI.
+ */
+static bool dv_ps5_hdmi(const struct drm_connector *connector)
+{
+#ifdef CONFIG_X86_PS5
+	return connector->connector_type == DRM_MODE_CONNECTOR_DisplayPort &&
+	       isHdmiHdrSupported();
+#else
+	return false;
+#endif
+}
+
+static bool dv_hdmi_connector(const struct drm_connector *connector)
+{
+	return connector->connector_type == DRM_MODE_CONNECTOR_HDMIA ||
+	       dv_ps5_hdmi(connector);
+}
+
+static bool dv_hdmi_stream(const struct drm_connector *connector,
+			   const struct dc_stream_state *stream)
+{
+	if (dv_ps5_hdmi(connector))
+		return dc_is_dp_signal(stream->signal);
+	return stream->signal == SIGNAL_TYPE_HDMI_TYPE_A &&
+	       stream->link && stream->link->connector_signal == SIGNAL_TYPE_HDMI_TYPE_A;
+}
+
 void amdgpu_dm_dv_attach(struct amdgpu_dm_connector *connector)
 {
 	struct amdgpu_device *adev = drm_to_adev(connector->base.dev);
 
 	if (!adev->dm.dc ||
 	    !dv_dcn_supported(adev->dm.dc->ctx->dce_version) ||
-	    connector->base.connector_type != DRM_MODE_CONNECTOR_HDMIA ||
-	    !connector->dc_link ||
-	    connector->dc_link->connector_signal != SIGNAL_TYPE_HDMI_TYPE_A)
+	    !connector->dc_link)
+		return;
+	if (!dv_ps5_hdmi(&connector->base) &&
+	    (connector->base.connector_type != DRM_MODE_CONNECTOR_HDMIA ||
+	     connector->dc_link->connector_signal != SIGNAL_TYPE_HDMI_TYPE_A))
 		return;
 
 	if (dv_standard) {
@@ -169,10 +204,9 @@ int amdgpu_dm_dv_configure_stream(struct dc_stream_state *stream,
 		.lab_enabled = dv_standard && stream->ctx &&
 			dv_dcn_supported(stream->ctx->dce_version),
 		.sink_standard = edid && drm_dvbridge_edid(edid->raw_edid, edid->length),
-		.hdmi = stream->signal == SIGNAL_TYPE_HDMI_TYPE_A &&
+		.hdmi = (stream->signal == SIGNAL_TYPE_HDMI_TYPE_A || dv_ps5_hdmi(connector)) &&
 			connector->display_info.is_hdmi && connector->display_info.has_hdmi_infoframe,
-		.native_hdmi = connector->connector_type == DRM_MODE_CONNECTOR_HDMIA &&
-			stream->link && stream->link->connector_signal == SIGNAL_TYPE_HDMI_TYPE_A,
+		.native_hdmi = dv_hdmi_connector(connector) && dv_hdmi_stream(connector, stream),
 		.rgb = stream->timing.pixel_encoding == PIXEL_ENCODING_RGB,
 		.limited_range = state->base.hdmi.broadcast_rgb != DRM_HDMI_BROADCAST_RGB_FULL,
 		.hdr_blob = !!state->base.hdr_output_metadata,
@@ -279,7 +313,7 @@ int amdgpu_dm_dv_add_affected(struct drm_atomic_commit *state)
 		drm_connector_list_iter_end(&iter);
 
 		for_each_new_connector_in_state(state, connector, con_state, j) {
-			if (connector->connector_type == DRM_MODE_CONNECTOR_HDMIA &&
+			if (dv_hdmi_connector(connector) &&
 			    con_state->crtc == crtc && to_dm_connector_state(con_state)->dv_standard)
 				requested = true;
 			if (connector->connector_type == DRM_MODE_CONNECTOR_HDMIA &&
@@ -364,7 +398,6 @@ int amdgpu_dm_dv_atomic_check(struct drm_atomic_commit *state)
 		    stream->out_transfer_func.type != TF_TYPE_BYPASS ||
 		    stream->gamut_remap_matrix.enable_remap || stream->csc_color_matrix.enable_adjustment ||
 		    stream->output_color_space != COLOR_SPACE_SRGB ||
-		    stream->signal != SIGNAL_TYPE_HDMI_TYPE_A ||
 		    !stream->avi_infopacket.valid || !stream->vsp_infopacket.valid ||
 		    /* Recheck the DC raster after global validation, not only the plane. */
 		    stream->timing.flags.INTERLACE ||
@@ -385,10 +418,12 @@ int amdgpu_dm_dv_atomic_check(struct drm_atomic_commit *state)
 
 			if (con->crtc != crtc)
 				continue;
+			if (!dv_hdmi_stream(connector, stream))
+				return -EINVAL;
 
 			if (!edid || !drm_dvbridge_edid(edid->raw_edid, edid->length) ||
 			    dvbridge_parse_edid(edid->raw_edid, edid->length).version != 2 ||
-			    connector->connector_type != DRM_MODE_CONNECTOR_HDMIA ||
+			    !dv_hdmi_connector(connector) ||
 			    !to_dm_connector_state(con)->dv_standard ||
 			    to_dm_connector_state(con)->hdr10_deep_color ||
 			    con->hdr_output_metadata || con->colorspace ||

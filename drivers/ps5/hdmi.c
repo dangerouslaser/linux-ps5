@@ -151,8 +151,12 @@ static bool flava3_high_tmds(const struct drm_display_mode *mode)
 static bool hdr_enabled;
 static bool bt2020_enabled;
 
+/* Serializes use of i2c_ctx, held from i2c_init() to i2c_exec(). */
+static DEFINE_MUTEX(i2c_lock);
+
 static void i2c_init(u8 code)
 {
+	mutex_lock(&i2c_lock);
 	i2c_ctx.msg_cur = i2c_ctx.msg_buf;
 	i2c_ctx.msg_hdr = (struct icc_i2c_msg *)i2c_ctx.msg_cur;
 
@@ -178,10 +182,9 @@ static int i2c_exec(void)
 	memcpy(msg->data, i2c_ctx.msg_hdr, i2c_ctx.msg_hdr->length);
 
 	ret = icc_query(buf, buf);
-	if (ret)
-		return ret;
+	mutex_unlock(&i2c_lock);
 
-	return 0;
+	return ret;
 }
 
 static void i2c_write_block(struct i2c_block *block, size_t count)
@@ -979,13 +982,37 @@ static void setHdrConfigFlava3(const struct hdmi_drm_infoframe *frame, bool bt20
 	bt2020_enabled = bt2020;
 }
 
-static void setHdmiAudioConfigBasic(int channels)
+/* Audio stream format, set by the HDA driver. 0 channels: none yet. */
+static int audio_channels;
+static int audio_rate = 48000;
+static bool audio_non_pcm;
+static DEFINE_MUTEX(audio_lock);
+
+/* IEC 60958-3 sample frequency code (channel status byte 3, bits 3:0). */
+static u8 iec60958_fs_code(int rate, bool hbr)
+{
+	if (hbr)
+		return 0x09; /* 768 kHz */
+
+	switch (rate) {
+	case 32000: return 0x03;
+	case 44100: return 0x00;
+	case 88200: return 0x08;
+	case 96000: return 0x0a;
+	case 176400: return 0x0c;
+	case 192000: return 0x0e;
+	default: return 0x02; /* 48 kHz */
+	}
+}
+
+static void setHdmiAudioConfigBasic(int channels, u8 fs, bool hbr)
 {
 	i2c_init(2);
 	i2c_begin_block();
 	i2c_write(0x62a0, 0x06);
 	i2c_write(0x62a7, 0x13);
-	i2c_write(0x62ac, 0x82);
+	/* 0x82 (stock) mis-recovers 192 kHz audio from DP */
+	i2c_write(0x62ac, 0x8a);
 	i2c_write(0x62cb, 0x02);
 	i2c_write(0x62cb, 0x03);
 	i2c_write(0x62cb, 0x00);
@@ -994,16 +1021,17 @@ static void setHdmiAudioConfigBasic(int channels)
 	i2c_write(0x70a9, 0x5e);
 	i2c_end_block();
 	i2c_mask(0x70af, 0x06, 0x06);
-	i2c_mask(0x70b3, 0x02, 0x0f);
+	i2c_mask(0x70b3, fs, 0x0f);
 	i2c_mask(0x70ae, 0x80, 0xe0);
 	i2c_mask(0x70ae, max(1, channels - 1), 0x07);
-	i2c_mask(0x70ac, 0x01, 0x21);
+	/* Bit 5: HBR audio sample packets */
+	i2c_mask(0x70ac, hbr ? 0x21 : 0x01, 0x21);
 	i2c_mask(0x70ab, 0x81, 0x89);
 	i2c_mask(0x70a9, 0x08, 0x08);
 	i2c_exec();
 }
 
-static void setAudioConfigAdditional(int channels)
+static void setAudioConfigAdditional(int channels, u8 fs, bool non_pcm)
 {
 	u8 val = 0x00;
 	switch (channels) {
@@ -1015,10 +1043,11 @@ static void setAudioConfigAdditional(int channels)
 	case 8: val = 0x13; break;
 	}
 	i2c_init(2);
-	i2c_mask(0x70b0, 0x00, 0xff);
+	/* IEC 60958 channel status, byte 0 bit 1: non-audio */
+	i2c_mask(0x70b0, non_pcm ? 0x02 : 0x00, 0xff);
 	i2c_mask(0x70b1, 0x79, 0xff);
 	i2c_mask(0x70b2, 0x00, 0xff);
-	i2c_mask(0x70b3, 0x02, 0xff);
+	i2c_mask(0x70b3, fs, 0xff);
 	i2c_mask(0x70b4, 0x0b, 0x0f);
 	i2c_mask(0x70b5, 0x00, 0xff);
 	i2c_mask(0x70b6, 0x00, 0xff);
@@ -1039,8 +1068,17 @@ static void setAudioConfigAdditional(int channels)
 
 static void sceHdmiSetAudioConfigFlava3(int channels)
 {
-	setHdmiAudioConfigBasic(channels);
-	setAudioConfigAdditional(channels);
+	bool hbr = audio_non_pcm && audio_channels == 8 && audio_rate == 192000;
+	u8 fs;
+
+	/* Use the stream format once the HDA driver has set one. A non-PCM
+	 * stream is sent with the layout it was packed in by IEC 61937. */
+	if (audio_channels)
+		channels = audio_channels;
+	fs = iec60958_fs_code(audio_rate, hbr);
+
+	setHdmiAudioConfigBasic(channels, fs, hbr);
+	setAudioConfigAdditional(channels, fs, audio_non_pcm);
 }
 
 static void initVerde(void)
@@ -1234,12 +1272,35 @@ EXPORT_SYMBOL(sceHdmiDeviceSetVideoMute);
 void sceHdmiSetAudioConfig(int channels)
 {
 	if (hdmi_ic_type == HDMI_IC_TYPE_FLAVA3) {
+		mutex_lock(&audio_lock);
 		sceHdmiSetAudioConfigFlava3(channels);
+		mutex_unlock(&audio_lock);
 	} else {
 		sceHdmiSetAudioConfigVerde(channels);
 	}
 }
 EXPORT_SYMBOL(sceHdmiSetAudioConfig);
+
+/*
+ * Called by the HDA driver when a stream is set up. The converter can't
+ * learn the format from the DP audio stream, it has to be told.
+ */
+void sceHdmiSetAudioStream(int channels, int rate, bool non_pcm)
+{
+	if (hdmi_ic_type != HDMI_IC_TYPE_FLAVA3)
+		return;
+
+	mutex_lock(&audio_lock);
+	if (channels != audio_channels || rate != audio_rate ||
+	    non_pcm != audio_non_pcm) {
+		audio_channels = channels;
+		audio_rate = rate;
+		audio_non_pcm = non_pcm;
+		sceHdmiSetAudioConfigFlava3(channels);
+	}
+	mutex_unlock(&audio_lock);
+}
+EXPORT_SYMBOL(sceHdmiSetAudioStream);
 
 void sceHdmiSetAudioMute(int mute)
 {

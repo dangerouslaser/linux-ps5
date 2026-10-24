@@ -13,6 +13,10 @@
 #include <sound/hda_codec.h>
 #include "hda_local.h"
 #include "hdmi_local.h"
+#ifdef CONFIG_X86_PS5
+/* drivers/ps5/hdmi.c; linux/ps5.h pulls in DRM headers that clash here. */
+void sceHdmiSetAudioStream(int channels, int rate, bool non_pcm);
+#endif
 
 #define is_amdhdmi_rev3_or_later(codec) \
 	((codec)->core.vendor_id == 0x1002aa01 && \
@@ -475,6 +479,18 @@ static int atihdmi_setup_stream(struct hda_codec *codec, hda_nid_t cvt_nid,
 
 		snd_hda_codec_write(codec, cvt_nid, 0, ATI_VERB_SET_RAMP_RATE, ramp_rate);
 	}
+
+#ifdef CONFIG_X86_PS5
+	{
+		/* HDA stream format: base rate, multiplier, divisor, channels */
+		int rate = (format & AC_FMT_BASE_44K ? 44100 : 48000) *
+			   (((format & AC_FMT_MULT_MASK) >> AC_FMT_MULT_SHIFT) + 1) /
+			   (((format & AC_FMT_DIV_MASK) >> AC_FMT_DIV_SHIFT) + 1);
+
+		sceHdmiSetAudioStream((format & AC_FMT_CHAN_MASK) + 1, rate,
+				      format & AC_FMT_TYPE_NON_PCM);
+	}
+#endif
 
 	return snd_hda_hdmi_setup_stream(codec, cvt_nid, pin_nid, dev_id,
 					 stream_tag, format);

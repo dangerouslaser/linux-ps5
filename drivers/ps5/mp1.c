@@ -409,16 +409,19 @@ static void mp1_set_bapm_param_set_all(void)
 	on_each_cpu(update_bapm_weights_smp, NULL, 1);
 
 	for (i = 0; i < 80; i++) {
-		mp1_bapm_set_l3_cacw(i, bapm_param_set_2.l3_cacw[i]);
+		if (mp1_bapm_set_l3_cacw(i, bapm_param_set_2.l3_cacw[i]) == -EBUSY)
+			return;
 	}
 
 	for (i = 0; i < bapm_param_set_2.gfx_cacw_len; i++) {
-		mp1_bapm_set_gfx_cacw(i, bapm_param_set_2.gfx_cacw[i]);
+		if (mp1_bapm_set_gfx_cacw(i, bapm_param_set_2.gfx_cacw[i]) == -EBUSY)
+			return;
 	}
 
 	for (i = 0; i < 176; i++) {
-		if (bapm_param_set_2.bapm_param[i][0])
-			mp1_bapm_write_param(i, bapm_param_set_2.bapm_param[i][1]);
+		if (bapm_param_set_2.bapm_param[i][0] &&
+		    mp1_bapm_write_param(i, bapm_param_set_2.bapm_param[i][1]) == -EBUSY)
+			return;
 	}
 }
 
@@ -460,7 +463,11 @@ static int __init mp1_init(void)
 	int ret;
 	int mode = 0;
 
-	mp1_universal_mode_exit();
+	/* MP1 doesn't answer after kexec; each message would time out. */
+	if (mp1_universal_mode_exit() == -EBUSY) {
+		pr_warn("MP1 not responding, BAPM params not set\n");
+		goto out;
+	}
 
 	pr_info("Set BAPM params\n");
 	mp1_get_wc_cpu(&mode);
@@ -469,6 +476,7 @@ static int __init mp1_init(void)
 	}
 	mp1_set_bapm_param_set_all();
 
+out:
 	ret = misc_register(&mp1_misc_device);
 	if (ret)
 		return ret;

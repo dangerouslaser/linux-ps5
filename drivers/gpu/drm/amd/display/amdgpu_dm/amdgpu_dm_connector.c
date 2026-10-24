@@ -577,6 +577,24 @@ void amdgpu_dm_update_connector_after_detect(
 		return;
 	}
 
+#ifdef CONFIG_X86_PS5
+	/*
+	 * The PS5 firmware re-sends the TV EDID after every TMDS link drop, and
+	 * DC builds a new sink object for it each time. Swapping sinks forces a
+	 * modeset, which drops the link again: a loop. Keep the sink the stream
+	 * already uses when nothing about it changed.
+	 */
+	if (sink && aconnector->dc_sink &&
+	    sink->sink_signal == aconnector->dc_sink->sink_signal &&
+	    sink->dc_edid.length == aconnector->dc_sink->dc_edid.length &&
+	    !memcmp(sink->dc_edid.raw_edid, aconnector->dc_sink->dc_edid.raw_edid,
+		    sink->dc_edid.length)) {
+		drm_dbg_kms(dev, "DCHPD: connector_id=%d: same EDID, keeping sink.\n",
+			    aconnector->connector_id);
+		return;
+	}
+#endif
+
 	drm_dbg_kms(dev, "DCHPD: connector_id=%d: Old sink=%p New sink=%p\n",
 		    aconnector->connector_id, aconnector->dc_sink, sink);
 

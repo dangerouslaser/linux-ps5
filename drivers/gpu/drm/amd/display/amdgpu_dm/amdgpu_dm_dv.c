@@ -413,12 +413,12 @@ static const char *dv_plane_reject(const struct drm_plane_state *p,
 		return "plane: dc->gamma_correction.is_identity";
 	if (!(dc->in_transfer_func.type == TF_TYPE_BYPASS))
 		return "plane: dc->in_transfer_func.type == TF_TYPE_BYPASS";
-	if (!(dc->in_shaper_func.type == TF_TYPE_BYPASS))
-		return "plane: dc->in_shaper_func.type == TF_TYPE_BYPASS";
-	if (!(dc->blend_tf.type == TF_TYPE_BYPASS))
-		return "plane: dc->blend_tf.type == TF_TYPE_BYPASS";
-	if (!(!dc->lut3d_func.state.bits.initialized))
-		return "plane: !dc->lut3d_func.state.bits.initialized";
+	if (!(dc->cm.shaper_func.type == TF_TYPE_BYPASS))
+		return "plane: dc->cm.shaper_func.type == TF_TYPE_BYPASS";
+	if (!(dc->cm.blend_func.type == TF_TYPE_BYPASS))
+		return "plane: dc->cm.blend_func.type == TF_TYPE_BYPASS";
+	if (!(!dc->cm.lut3d_func.state.bits.initialized))
+		return "plane: !dc->cm.lut3d_func.state.bits.initialized";
 	if (!(dc->hdr_mult.value == dc_fixpt_one.value))
 		return "plane: dc->hdr_mult.value == dc_fixpt_one.value";
 	if (!(!dc->gamut_remap_matrix.enable_remap))

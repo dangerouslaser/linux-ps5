@@ -1133,6 +1133,15 @@ module_param_named(ptl, amdgpu_ptl, int, 0444);
 int amdgpu_force_1080p = 0;
 MODULE_PARM_DESC(force_1080p, "Force 1080p (0 = disabled (default), 1 = enabled)");
 module_param_named(force_1080p, amdgpu_force_1080p, int, 0444);
+
+/**
+ * DOC: ps5_fractional_modes (int)
+ * Offer the 1000/1001 fractional variants (23.976, 29.97, 59.94 Hz) of the
+ * PS5 HDMI modes. 0 hides them, so players fall back to 24/30/60 Hz.
+ */
+int amdgpu_ps5_fractional_modes = 1;
+MODULE_PARM_DESC(ps5_fractional_modes, "PS5: offer 1000/1001 fractional modes (1 = yes (default), 0 = no)");
+module_param_named(ps5_fractional_modes, amdgpu_ps5_fractional_modes, int, 0644);
 #endif
 
 /* These devices are not supported by amdgpu.

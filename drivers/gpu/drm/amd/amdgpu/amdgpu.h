@@ -274,6 +274,7 @@ extern uint amdgpu_hdmi_hpd_debounce_delay_ms;
 #define AMDGPU_MAX_USEC_TIMEOUT			100000	/* 100 ms */
 #ifdef CONFIG_X86_PS5
 extern int amdgpu_force_1080p;
+extern int amdgpu_ps5_fractional_modes;
 #endif
 
 #define AMDGPU_FENCE_JIFFIES_TIMEOUT		(HZ / 2)

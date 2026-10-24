@@ -2659,6 +2659,18 @@ enum drm_mode_status amdgpu_dm_connector_mode_valid(struct drm_connector *connec
 #ifdef CONFIG_X86_PS5
 	if (!isHdmiModeValid(mode, amdgpu_force_1080p))
 		return MODE_ERROR;
+	/* The CEA table holds the integer-rate clock; 1000/1001 variants differ. */
+	if (!amdgpu_ps5_fractional_modes && drm_match_cea_mode(mode)) {
+		struct drm_display_mode *cea =
+			drm_display_mode_from_cea_vic(connector->dev,
+						      drm_match_cea_mode(mode));
+		bool fractional = cea && cea->clock != mode->clock;
+
+		if (cea)
+			drm_mode_destroy(connector->dev, cea);
+		if (fractional)
+			return MODE_CLOCK_RANGE;
+	}
 #endif
 
 	if ((mode->flags & DRM_MODE_FLAG_INTERLACE) ||

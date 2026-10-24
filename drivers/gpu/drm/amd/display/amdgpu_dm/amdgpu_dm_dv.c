@@ -339,38 +339,93 @@ static bool dv_identity_tf(enum amdgpu_transfer_function tf)
 	return tf == AMDGPU_TRANSFER_FUNCTION_DEFAULT || tf == AMDGPU_TRANSFER_FUNCTION_IDENTITY;
 }
 
-static bool dv_plane_neutral(const struct drm_plane_state *p,
-			     const struct drm_display_mode *mode)
+static const char *dv_plane_reject(const struct drm_plane_state *p,
+				   const struct drm_display_mode *mode)
 {
 	const struct dm_plane_state *dm = to_dm_plane_state(p);
 	const struct dc_plane_state *dc = dm->dc_state;
 
-	return p->plane->type != DRM_PLANE_TYPE_CURSOR && p->fb &&
-		(p->fb->format->format == DRM_FORMAT_XRGB8888 ||
-		 p->fb->format->format == DRM_FORMAT_XBGR8888) &&
-		p->rotation == DRM_MODE_ROTATE_0 && p->alpha == DRM_BLEND_ALPHA_OPAQUE &&
-		/* Primary planes do not expose pixel blend mode on AMD. XRGB/XBGR
-		 * have no alpha channel: upstream disables per-pixel blending even
-		 * when the property's implicit default is PREMULTI.
-		 */
-		!p->color_pipeline && p->visible &&
-		p->fb->width == mode->hdisplay && p->fb->height == mode->vdisplay &&
-		!p->src_x && !p->src_y && !p->crtc_x && !p->crtc_y &&
-		p->src_w == (mode->hdisplay << 16) && p->src_h == (mode->vdisplay << 16) &&
-		p->crtc_w == mode->hdisplay && p->crtc_h == mode->vdisplay &&
-		!dm->degamma_lut && !dm->ctm && !dm->shaper_lut && !dm->lut3d &&
-		!dm->blend_lut && dv_identity_tf(dm->degamma_tf) &&
-		dv_identity_tf(dm->shaper_tf) && dv_identity_tf(dm->blend_tf) &&
-		dm->hdr_mult == AMDGPU_HDR_MULT_DEFAULT && dc &&
-		dc->visible && !dc->horizontal_mirror && dc->rotation == ROTATION_ANGLE_0 &&
-		!dc->per_pixel_alpha && !dc->global_alpha &&
-		dc->gamma_correction.is_identity &&
-		dc->in_transfer_func.type == TF_TYPE_BYPASS &&
-		dc->in_shaper_func.type == TF_TYPE_BYPASS &&
-		dc->blend_tf.type == TF_TYPE_BYPASS && !dc->lut3d_func.state.bits.initialized &&
-		dc->hdr_mult.value == dc_fixpt_one.value &&
-		!dc->gamut_remap_matrix.enable_remap &&
-		!dc->input_csc_color_matrix.enable_adjustment;
+	if (!(p->plane->type != DRM_PLANE_TYPE_CURSOR))
+		return "plane: p->plane->type != DRM_PLANE_TYPE_CURSOR";
+	if (!(p->fb))
+		return "plane: p->fb";
+	if (!((p->fb->format->format == DRM_FORMAT_XRGB8888 || p->fb->format->format == DRM_FORMAT_XBGR8888)))
+		return "plane: (p->fb->format->format == DRM_FORMAT_XRGB8888 || p->fb->format->format == DRM_FORMAT_XBGR8888)";
+	if (!(p->rotation == DRM_MODE_ROTATE_0))
+		return "plane: p->rotation == DRM_MODE_ROTATE_0";
+	if (!(p->alpha == DRM_BLEND_ALPHA_OPAQUE))
+		return "plane: p->alpha == DRM_BLEND_ALPHA_OPAQUE";
+	if (!(!p->color_pipeline))
+		return "plane: !p->color_pipeline";
+	if (!(p->visible))
+		return "plane: p->visible";
+	if (!(p->fb->width == mode->hdisplay))
+		return "plane: p->fb->width == mode->hdisplay";
+	if (!(p->fb->height == mode->vdisplay))
+		return "plane: p->fb->height == mode->vdisplay";
+	if (!(!p->src_x))
+		return "plane: !p->src_x";
+	if (!(!p->src_y))
+		return "plane: !p->src_y";
+	if (!(!p->crtc_x))
+		return "plane: !p->crtc_x";
+	if (!(!p->crtc_y))
+		return "plane: !p->crtc_y";
+	if (!(p->src_w == (mode->hdisplay << 16)))
+		return "plane: p->src_w == (mode->hdisplay << 16)";
+	if (!(p->src_h == (mode->vdisplay << 16)))
+		return "plane: p->src_h == (mode->vdisplay << 16)";
+	if (!(p->crtc_w == mode->hdisplay))
+		return "plane: p->crtc_w == mode->hdisplay";
+	if (!(p->crtc_h == mode->vdisplay))
+		return "plane: p->crtc_h == mode->vdisplay";
+	if (!(!dm->degamma_lut))
+		return "plane: !dm->degamma_lut";
+	if (!(!dm->ctm))
+		return "plane: !dm->ctm";
+	if (!(!dm->shaper_lut))
+		return "plane: !dm->shaper_lut";
+	if (!(!dm->lut3d))
+		return "plane: !dm->lut3d";
+	if (!(!dm->blend_lut))
+		return "plane: !dm->blend_lut";
+	if (!(dv_identity_tf(dm->degamma_tf)))
+		return "plane: dv_identity_tf(dm->degamma_tf)";
+	if (!(dv_identity_tf(dm->shaper_tf)))
+		return "plane: dv_identity_tf(dm->shaper_tf)";
+	if (!(dv_identity_tf(dm->blend_tf)))
+		return "plane: dv_identity_tf(dm->blend_tf)";
+	if (!(dm->hdr_mult == AMDGPU_HDR_MULT_DEFAULT))
+		return "plane: dm->hdr_mult == AMDGPU_HDR_MULT_DEFAULT";
+	if (!(dc))
+		return "plane: dc";
+	if (!(dc->visible))
+		return "plane: dc->visible";
+	if (!(!dc->horizontal_mirror))
+		return "plane: !dc->horizontal_mirror";
+	if (!(dc->rotation == ROTATION_ANGLE_0))
+		return "plane: dc->rotation == ROTATION_ANGLE_0";
+	if (!(!dc->per_pixel_alpha))
+		return "plane: !dc->per_pixel_alpha";
+	if (!(!dc->global_alpha))
+		return "plane: !dc->global_alpha";
+	if (!(dc->gamma_correction.is_identity))
+		return "plane: dc->gamma_correction.is_identity";
+	if (!(dc->in_transfer_func.type == TF_TYPE_BYPASS))
+		return "plane: dc->in_transfer_func.type == TF_TYPE_BYPASS";
+	if (!(dc->in_shaper_func.type == TF_TYPE_BYPASS))
+		return "plane: dc->in_shaper_func.type == TF_TYPE_BYPASS";
+	if (!(dc->blend_tf.type == TF_TYPE_BYPASS))
+		return "plane: dc->blend_tf.type == TF_TYPE_BYPASS";
+	if (!(!dc->lut3d_func.state.bits.initialized))
+		return "plane: !dc->lut3d_func.state.bits.initialized";
+	if (!(dc->hdr_mult.value == dc_fixpt_one.value))
+		return "plane: dc->hdr_mult.value == dc_fixpt_one.value";
+	if (!(!dc->gamut_remap_matrix.enable_remap))
+		return "plane: !dc->gamut_remap_matrix.enable_remap";
+	if (!(!dc->input_csc_color_matrix.enable_adjustment))
+		return "plane: !dc->input_csc_color_matrix.enable_adjustment";
+	return NULL;
 }
 
 int amdgpu_dm_dv_atomic_check(struct drm_atomic_commit *state)
@@ -381,6 +436,7 @@ int amdgpu_dm_dv_atomic_check(struct drm_atomic_commit *state)
 	struct drm_plane_state *ps;
 	struct drm_connector *connector;
 	struct drm_connector_state *con;
+	const char *why;
 	int i, j;
 
 	for_each_new_crtc_in_state(state, crtc, cs, i) {
@@ -421,29 +477,49 @@ int amdgpu_dm_dv_atomic_check(struct drm_atomic_commit *state)
 			if (!dv_hdmi_stream(connector, stream))
 				return -EINVAL;
 
+			why = NULL;
 			if (!edid || !drm_dvbridge_edid(edid->raw_edid, edid->length) ||
-			    dvbridge_parse_edid(edid->raw_edid, edid->length).version != 2 ||
-			    !dv_hdmi_connector(connector) ||
-			    !to_dm_connector_state(con)->dv_standard ||
-			    to_dm_connector_state(con)->hdr10_deep_color ||
-			    con->hdr_output_metadata || con->colorspace ||
-			    con->max_requested_bpc != 8 ||
-			    con->hdmi.broadcast_rgb != DRM_HDMI_BROADCAST_RGB_FULL ||
-			    to_dm_connector_state(con)->scaling != RMX_OFF ||
-			    to_dm_connector_state(con)->underscan_enable)
-				return -EINVAL;
+			    dvbridge_parse_edid(edid->raw_edid, edid->length).version != 2)
+				why = "connector: sink EDID is not Standard-DV v2";
+			else if (!dv_hdmi_connector(connector))
+				why = "connector: not HDMI";
+			else if (!to_dm_connector_state(con)->dv_standard)
+				why = "connector: DV property off";
+			else if (to_dm_connector_state(con)->hdr10_deep_color)
+				why = "connector: HDR10 deep colour on";
+			else if (con->hdr_output_metadata)
+				why = "connector: HDR_OUTPUT_METADATA set";
+			else if (con->colorspace)
+				why = "connector: Colorspace not default";
+			else if (con->max_requested_bpc != 8)
+				why = "connector: max bpc not 8";
+			else if (con->hdmi.broadcast_rgb != DRM_HDMI_BROADCAST_RGB_FULL)
+				why = "connector: Broadcast RGB not full";
+			else if (to_dm_connector_state(con)->scaling != RMX_OFF)
+				why = "connector: scaling on";
+			else if (to_dm_connector_state(con)->underscan_enable)
+				why = "connector: underscan on";
+			if (why)
+				goto reject;
 			connectors++;
 		}
 		for_each_new_plane_in_state(state, plane, ps, j) {
 			if (ps->crtc != crtc || !ps->fb)
 				continue;
-			if (!dv_plane_neutral(ps, &cs->mode))
-				return -EINVAL;
+			why = dv_plane_reject(ps, &cs->mode);
+			if (why)
+				goto reject;
 			planes++;
 		}
 		if (connectors != 1 || planes != 1 || hweight32(cs->connector_mask) != 1 ||
-		    hweight32(cs->plane_mask) != 1)
-			return -EINVAL;
+		    hweight32(cs->plane_mask) != 1) {
+			why = "count: one connector and one plane";
+			goto reject;
+		}
 	}
 	return 0;
+
+reject:
+	drm_dbg_kms(state->dev, "Standard-DV rejected: %s\n", why);
+	return -EINVAL;
 }

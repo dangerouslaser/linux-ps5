@@ -1463,7 +1463,10 @@ void amdgpu_dm_ps5_hotplug_work_func(struct work_struct *work)
 	struct drm_connector_list_iter iter;
 	struct drm_connector *connector;
 
-	dm->ps5_hdmi_resetup_until = jiffies + msecs_to_jiffies(PS5_HDMI_RESETUP_WINDOW_MS);
+	if (time_after(jiffies, dm->ps5_hdmi_resetup_last +
+		       msecs_to_jiffies(PS5_HDMI_RESETUP_HOLDOFF_MS)))
+		dm->ps5_hdmi_resetup_until = jiffies +
+			msecs_to_jiffies(PS5_HDMI_RESETUP_WINDOW_MS);
 
 	drm_connector_list_iter_begin(dev, &iter);
 	drm_for_each_connector_iter(connector, &iter) {

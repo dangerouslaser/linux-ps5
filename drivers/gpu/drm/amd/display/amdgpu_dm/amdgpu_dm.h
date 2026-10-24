@@ -747,6 +747,7 @@ struct amdgpu_display_manager {
 	struct work_struct ps5_hotplug_work;
 	struct delayed_work ps5_hdmi_resetup_work;
 	unsigned long ps5_hdmi_resetup_until;
+	unsigned long ps5_hdmi_resetup_last;
 	bool ps5_hdmi_resetup;
 #endif
 };
@@ -754,6 +755,11 @@ struct amdgpu_display_manager {
 #ifdef CONFIG_X86_PS5
 #define PS5_HDMI_RESETUP_WINDOW_MS	10000
 #define PS5_HDMI_RESETUP_DELAY_MS	500
+/* A resetup modeset drops the TMDS link, and the firmware can answer that
+ * with another EDID notification. Without a holdoff this repeats every few
+ * seconds, which keeps knocking the sink out of Dolby Vision.
+ */
+#define PS5_HDMI_RESETUP_HOLDOFF_MS	30000
 
 void amdgpu_dm_ps5_hotplug_work_func(struct work_struct *work);
 void amdgpu_dm_ps5_hotplug_handler(void *data);

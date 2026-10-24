@@ -3803,6 +3803,8 @@ void amdgpu_dm_ps5_hdmi_resetup_work_func(struct work_struct *work)
 	drm_connector_list_iter_end(&iter);
 
 	dm->ps5_hdmi_resetup = false;
+	dm->ps5_hdmi_resetup_last = jiffies;
+	dm->ps5_hdmi_resetup_until = jiffies;
 	drm_modeset_unlock_all(dev);
 }
 #endif

@@ -1387,6 +1387,7 @@ static int dm_hw_init(struct amdgpu_ip_block *ip_block)
 	INIT_DELAYED_WORK(&adev->dm.ps5_hdmi_resetup_work,
 			  amdgpu_dm_ps5_hdmi_resetup_work_func);
 	adev->dm.ps5_hdmi_resetup_until = jiffies;
+	adev->dm.ps5_hdmi_resetup_last = jiffies - msecs_to_jiffies(PS5_HDMI_RESETUP_HOLDOFF_MS);
 	hdmi_set_hotplug_handler(amdgpu_dm_ps5_hotplug_handler, &adev->dm);
 #else
 	amdgpu_dm_hpd_init(adev);

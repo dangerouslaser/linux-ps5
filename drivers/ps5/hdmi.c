@@ -120,9 +120,9 @@ static char *extra_vics = "";
 module_param(extra_vics, charp, 0644);
 MODULE_PARM_DESC(extra_vics, "Experimental: extra CTA VICs to allow, comma separated");
 
-static int content_type = -1;
+static int content_type = 3;
 module_param(content_type, int, 0644);
-MODULE_PARM_DESC(content_type, "AVI content type: -1 game (default), 0 none, 1 graphics, 2 photo, 3 cinema, 4 game");
+MODULE_PARM_DESC(content_type, "AVI content type: -1 game, 0 none, 1 graphics, 2 photo, 3 cinema (default), 4 game");
 
 static bool is_extra_vic(u8 vic)
 {

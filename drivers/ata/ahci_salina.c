@@ -254,7 +254,6 @@ static int salina_ahci_suspend(struct device *dev)
 	struct ahci_host_priv *hpriv;
 	void __iomem *mmio;
 	u32 ctl;
-	int rc;
 
 	if (!host)
 		return 0;
@@ -267,9 +266,7 @@ static int salina_ahci_suspend(struct device *dev)
 	writel(ctl, mmio + HOST_CTL);
 	readl(mmio + HOST_CTL);
 
-	rc = ata_host_suspend(host, PMSG_SUSPEND);
-	if (rc)
-		return rc;
+	ata_host_suspend(host, PMSG_SUSPEND);
 
 	pci_save_state(pdev);
 	pci_set_power_state(pdev, PCI_D3hot);
